@@ -15,7 +15,8 @@ This projects stack will be
 
 ###Todo -
 [] create HTML template for front-end.
-[] figure out the typescript and structure the components.
+[] figure out the typescript
+[] structure the components.
 [] figure out UX.
 [] create MongoDB database.
 [] create the server.
