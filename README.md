@@ -24,10 +24,13 @@ This projects stack will be
 
 [] figure out UX.
 
-[x] create MongoDB database.
-
 [] figure out how to add and remove from my database via the server or react...
 
 [] create the server.
 
 [] finalize name
+
+
+
+[x] create MongoDB database.
+
