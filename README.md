@@ -13,16 +13,26 @@ This projects stack will be
 
 *currently debating the use of python for the back-end as the database will be written in python anyway.
 
-###Todo -
+##Todo -
+### Up next
 
+[] do a bit of python exploration
 
+[] finish scaffolding project
+
+### General Todos
 [] create HTML template for front-end
 
 [] figure out the typescript
 
 [] structure the components.
 
+[] sort out all functionality
+
 [] figure out UX.
+
+[] how to encrypt database?
+  - encrypt before put in and decrypt on the way out, maybe?
 
 [] figure out how to add and remove from my database via the server or react...
 
