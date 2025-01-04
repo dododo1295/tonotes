@@ -20,6 +20,7 @@ func GenerateUserID() string {
 	return id.String()
 }
 
-func NewUser(repo repository.UsersRepo) *UserService {
-	return &UserService{repo: repo}
+func NewUserService(repo repository.UsersRepo) *UserService {
+	return &UserService{repo : repo
+		userID : GenerateUserID(),}
 }
