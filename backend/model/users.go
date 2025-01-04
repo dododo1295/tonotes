@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 type User struct {
 	UserID    string    `bson:"user_id" json:"user_id"`     // Unique ID number
 	Username  string    `bson:"username" json:"username"`   // Username field
