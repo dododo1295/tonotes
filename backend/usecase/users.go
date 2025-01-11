@@ -38,9 +38,27 @@ func (svc *UserService) CreateUser(c *gin.Context) {
 
 	// assign user ID
 	user.UserID = uuid.NewString()
+	repo := repository.UsersRepo{MongoCollection: svc.MongoCollection}
+
+	for {
+		existingUser, err := repo.FindUser(user.UserID)
+		if err != nil {
+			c.JSON(500, Response{Error: "Error checking user existence: " + err.Error()})
+			log.Println("Error checking user existence: ", err)
+			return
+		}
+
+		if existingUser == nil {
+			// User ID is unique, break out of the loop
+			break
+		}
+
+		// If user ID exists, generate a new one and check again
+		user.UserID = uuid.NewString()
+		log.Println("Generated new user ID: ", user.UserID)
+	}
 
 	// inserting the ID with the new User
-	repo := repository.UsersRepo{MongoCollection: svc.MongoCollection}
 
 	insertID, err := repo.AddUser(&user)
 	if err != nil {
