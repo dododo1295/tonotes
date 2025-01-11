@@ -102,7 +102,7 @@ func TestMongoOperations(t *testing.T) {
 	t.Run("UpdateUserByID", func(t *testing.T) {
 		user := model.User{
 			UserID:   user1,
-			Username: "Success",
+			Username: "just_once_more",
 		}
 		result, err := userRepo.UpdateUserByID(user2, &user)
 		if err != nil {
