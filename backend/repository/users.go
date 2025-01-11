@@ -11,7 +11,6 @@ import (
 )
 
 // NOTE: This repo STILL does not have the ability to find username via email
-
 // Getting DB
 type UsersRepo struct {
 	MongoCollection *mongo.Collection
@@ -28,13 +27,18 @@ func (r *UsersRepo) AddUser(user *model.User) (interface{}, error) {
 
 // Finding User
 func (r *UsersRepo) FindUser(userID string) (*model.User, error) {
-	var usr model.User
+	var user model.User
 	err := r.MongoCollection.FindOne(context.Background(),
-		bson.D{{Key: "user_id", Value: userID}}).Decode(&usr)
+		bson.D{{Key: "user_id", Value: userID}}).Decode(&user)
 	if err != nil {
+		// Handle the case where no document is found
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
 		return nil, err
 	}
-	return &usr, nil
+
+	return &user, nil
 }
 
 // Updating User Password
@@ -58,9 +62,16 @@ func (r *UsersRepo) UpdateUserPassword(userID string, hashedPassword string) (in
 
 // Updating Username
 func (r *UsersRepo) UpdateUserByID(userID string, updateID *model.User) (int64, error) {
-	result, err := r.MongoCollection.UpdateOne(context.Background(),
-		bson.D{{Key: "user_id", Value: userID}},
-		bson.D{{Key: "$set", Value: updateID}})
+	filter := bson.D{{Key: "user_id", Value: userID}}
+	// setting to only update the username
+	update := bson.D{
+		{Key: "$set", Value: bson.D{
+			{Key: "username", Value: updateID.Username},
+		}},
+	}
+	// update now
+
+	result, err := r.MongoCollection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
 		return 0, err
 	}
