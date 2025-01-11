@@ -29,9 +29,10 @@ ___
 
 ---
 
+## License
+This project is licensed under an **All Rights Reserved** license. Unauthorized copying, distribution, or use of this material is strictly prohibited.
 
-
-
+---
 
 ## Todo
 ### Up next
