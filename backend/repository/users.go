@@ -10,13 +10,15 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
+// NOTE: This repo STILL does not have the ability to find username via email
+
 // Getting DB
 type UsersRepo struct {
 	MongoCollection *mongo.Collection
 }
 
 // Creating User
-func (r *UsersRepo) InsertUser(user *model.User) (interface{}, error) {
+func (r *UsersRepo) AddUser(user *model.User) (interface{}, error) {
 	result, err := r.MongoCollection.InsertOne(context.Background(), user)
 	if err != nil {
 		return nil, err
