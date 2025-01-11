@@ -1,5 +1,5 @@
 import "../css/Todos.css";
-import { useTodoContext } from "../contexts/TodoContext.tsx";
+import TodoContext from "../contexts/TodoContext.tsx";
 
 function Todos() {
   return (

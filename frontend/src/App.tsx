@@ -1,7 +1,8 @@
 import Navbar from "./components/NavBar.tsx";
 import "./css/App.css";
 import Todos from "./pages/Todos.tsx";
-import { Routes, Route } from "react-router-dom";
+import Home from "./pages/Home.tsx";
+import { Route, Routes } from "react-router-dom";
 
 function App() {
   return (
@@ -10,6 +11,7 @@ function App() {
       <Routes>
         <Route path="/todos" element={<Todos />}></Route>
       </Routes>
+      <Home />
     </>
   );
 }
