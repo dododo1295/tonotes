@@ -2,9 +2,12 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"main/model"
+	"main/services"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -17,10 +20,22 @@ type UsersRepo struct {
 }
 
 // Creating User
-func (r *UsersRepo) AddUser(user *model.User) (interface{}, error) {
-	result, err := r.MongoCollection.InsertOne(context.Background(), user)
+func (r *UsersRepo) AddUser(ctx context.Context, user *model.User) (interface{}, error) {
+	if user.Username == "" || user.Password == "" {
+		return nil, errors.New("username and password required")
+	}
+	hashedPassword, err := services.HashPassword(user.Password)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("failed to hash")
+	}
+
+	user.Password = hashedPassword
+
+	user.CreatedAt = time.Now()
+
+	result, err := r.MongoCollection.InsertOne(ctx, user)
+	if err != nil {
+		return nil, errors.New("failed to add user to database")
 	}
 	return result.InsertedID, nil
 }

@@ -29,7 +29,7 @@ func (svc *UserService) CreateUser(c *gin.Context) {
 
 	var user model.User
 
-	if err := c.ShouldBindJSON(&user); err == nil {
+	if err := c.ShouldBindJSON(&user); err != nil {
 		// Response is Bad Request
 		c.JSON(400, Response{Error: "Error decoding: " + err.Error()})
 		log.Println("Error decoding: ", err)
@@ -38,6 +38,8 @@ func (svc *UserService) CreateUser(c *gin.Context) {
 
 	// assign user ID
 	user.UserID = uuid.NewString()
+
+	// inserting the ID with the new User
 	repo := repository.UsersRepo{MongoCollection: svc.MongoCollection}
 
 	for {
@@ -58,9 +60,7 @@ func (svc *UserService) CreateUser(c *gin.Context) {
 		log.Println("Generated new user ID: ", user.UserID)
 	}
 
-	// inserting the ID with the new User
-
-	insertID, err := repo.AddUser(&user)
+	insertID, err := repo.AddUser(c, &user)
 	if err != nil {
 		c.JSON(400, Response{Error: "Error adding user ID: " + err.Error()})
 		log.Println("error adding user: ", err)
