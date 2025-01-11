@@ -46,6 +46,9 @@ func TestMongoOperations(t *testing.T) {
 
 	// Adding Users!
 	t.Run("CreateUser", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
 		user := model.User{
 			UserID:    user1,
 			Username:  "testUser",
@@ -54,7 +57,7 @@ func TestMongoOperations(t *testing.T) {
 			CreatedAt: time.Now(),
 		}
 
-		result, err := userRepo.AddUser(&user)
+		result, err := userRepo.AddUser(ctx, &user)
 		if err != nil {
 			t.Fatal("add user failed!", err)
 		}
@@ -62,6 +65,9 @@ func TestMongoOperations(t *testing.T) {
 	})
 
 	t.Run("CreateUser", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
 		user := model.User{
 			UserID:    user2,
 			Username:  "testUser2",
@@ -70,7 +76,7 @@ func TestMongoOperations(t *testing.T) {
 			CreatedAt: time.Now(),
 		}
 
-		result, err := userRepo.AddUser(&user)
+		result, err := userRepo.AddUser(ctx, &user)
 		if err != nil {
 			t.Fatal("add user failed!", err)
 		}
