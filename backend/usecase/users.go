@@ -24,7 +24,7 @@ type Response struct {
 }
 
 // creating user and inserting uuid
-func (svc *UserService) createUser(c *gin.Context) {
+func (svc *UserService) CreateUser(c *gin.Context) {
 	res := &Response{}
 
 	var user model.User
