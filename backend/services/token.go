@@ -5,8 +5,7 @@ import (
 
 	"main/utils"
 
-	"github.com/dgrijalva/jwt-go"
-	// Import your utils package
+	"github.com/golang-jwt/jwt/v5" // Update the import here
 )
 
 // GenerateJWT generates a JWT token for the user with their ID and expiration time
@@ -14,6 +13,7 @@ func GenerateJWT(userID string) (string, error) {
 	// Use the loaded expiration time from the utils package
 	expirationTime := time.Now().Add(time.Duration(utils.JWTExpirationTime) * time.Second)
 
+	// Claims for the JWT
 	claims := jwt.MapClaims{
 		"user_id": userID,
 		"exp":     expirationTime.Unix(),
