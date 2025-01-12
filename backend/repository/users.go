@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"main/model"
 	"main/services"
+	"main/utils"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -40,7 +42,28 @@ func (r *UsersRepo) AddUser(ctx context.Context, user *model.User) (interface{},
 	return result.InsertedID, nil
 }
 
-// Finding User
+// Finding via username
+func (r *UsersRepo) FindUserByUsername(username string) (*model.User, error) {
+	// Access the MongoDB collection using the global MongoClient
+	collection := utils.MongoClient.Database("tonotes").Collection("users")
+
+	var user model.User
+	filter := bson.D{{Key: "username", Value: username}} // Query filter
+
+	// Find the user by username
+	err := collection.FindOne(context.Background(), filter).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil // User not found
+		}
+		log.Println("Error finding user:", err)
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+// Finding UserID
 func (r *UsersRepo) FindUser(userID string) (*model.User, error) {
 	var user model.User
 	err := r.MongoCollection.FindOne(context.Background(),
