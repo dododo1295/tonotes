@@ -17,6 +17,8 @@ func GenerateJWT(userID string) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id": userID,
 		"exp":     expirationTime.Unix(),
+		"iat":     time.Now().Unix(),
+		"iss":     "toNotes",
 	}
 
 	// Generate the token using the JWT secret from the utils package
