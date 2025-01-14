@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"log"
+	"os"
 	"testing"
 	"time"
 
@@ -14,9 +15,23 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
+func TestMain(m *testing.M) {
+	// Set up test environment variables
+	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	os.Setenv("JWT_SECRET_KEY", "test_secret_key")
+	os.Setenv("JWT_EXPIRATION_TIME", "3600")
+	os.Setenv("REFRESH_TOKEN_EXPIRATION_TIME", "604800")
+
+	// Run the tests
+	code := m.Run()
+
+	// Clean up
+	os.Exit(code)
+}
+
 func newMongoClient() *mongo.Client {
 	mongoTestClient, err := mongo.Connect(context.Background(),
-		options.Client().ApplyURI("mongodb://localhost:27017"))
+		options.Client().ApplyURI(os.Getenv("MONGO_URI")))
 	if err != nil {
 		log.Fatal("error while connecting to database", err)
 	}
