@@ -28,7 +28,7 @@ func RefreshTokenHandler(c *gin.Context) {
 		return []byte(utils.JWTSecretKey), nil
 	})
 
-	if err != nil || token.Valid {
+	if err != nil || !token.Valid {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid refresh"})
 	}
 	// validate token type

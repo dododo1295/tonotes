@@ -16,7 +16,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// NOTE: This repo STILL does not have the ability to find username via email
 // Getting DB
 type UsersRepo struct {
 	MongoCollection *mongo.Collection

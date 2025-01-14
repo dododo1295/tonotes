@@ -15,16 +15,17 @@ var MongoClient *mongo.Client
 
 // InitMongoClient initializes the MongoDB client from the environment variables
 func InitMongoClient() {
-	// Load environment variables from .env file
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
+	// Only try to load .env if not in test mode
+	if os.Getenv("GO_ENV") != "test" {
+		if err := godotenv.Load(); err != nil {
+			log.Fatal("Error loading .env file")
+		}
 	}
 
-	// Retrieve MongoDB URI from the environment variables
+	// Get MongoDB URI from environment
 	mongoURI := os.Getenv("MONGO_URI")
 	if mongoURI == "" {
-		log.Fatal("MongoDB URI is not set in the .env file")
+		log.Fatal("MongoDB URI is not set")
 	}
 
 	// Initialize MongoDB client
@@ -36,4 +37,11 @@ func InitMongoClient() {
 
 	// Assign the client to the global MongoClient variable
 	MongoClient = client
+}
+
+func init() {
+	// Only initialize if not in test mode
+	if os.Getenv("GO_ENV") != "test" {
+		InitMongoClient()
+	}
 }

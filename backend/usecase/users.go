@@ -3,9 +3,11 @@ package usecase
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"main/model"
 	"main/repository"
+	"main/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -26,52 +28,57 @@ type Response struct {
 // creating user and inserting uuid
 func (svc *UserService) CreateUser(c *gin.Context) {
 	res := &Response{}
-
 	var user model.User
 
 	if err := c.ShouldBindJSON(&user); err != nil {
-		// Response is Bad Request
-		c.JSON(400, Response{Error: "Error decoding: " + err.Error()})
-		log.Println("Error decoding: ", err)
+		c.JSON(http.StatusBadRequest, Response{Error: "Invalid input: " + err.Error()})
+		c.Abort()
 		return
 	}
 
-	// assign user ID
+	// Generate UUID for new user
 	user.UserID = uuid.NewString()
 
-	// inserting the ID with the new User
+	// Hash the password
+	hashedPassword, err := services.HashPassword(user.Password)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, Response{Error: "Password validation failed: " + err.Error()})
+		c.Abort()
+		return
+	}
+	user.Password = hashedPassword
+
+	// Set creation time
+	user.CreatedAt = time.Now()
+
 	repo := repository.UsersRepo{MongoCollection: svc.MongoCollection}
 
-	for {
-		existingUser, err := repo.FindUser(user.UserID)
-		if err != nil {
-			c.JSON(500, Response{Error: "Error checking user existence: " + err.Error()})
-			log.Println("Error checking user existence: ", err)
-			return
-		}
-
-		if existingUser == nil {
-			// User ID is unique, break out of the loop
-			break
-		}
-
-		// If user ID exists, generate a new one and check again
-		user.UserID = uuid.NewString()
-		log.Println("Generated new user ID: ", user.UserID)
-	}
-
-	insertID, err := repo.AddUser(c, &user)
+	// Check if username already exists
+	existingUser, err := repo.FindUserByUsername(user.Username)
 	if err != nil {
-		c.JSON(400, Response{Error: "Error adding user ID: " + err.Error()})
-		log.Println("error adding user: ", err)
-
+		c.JSON(http.StatusInternalServerError, Response{Error: "Database error: " + err.Error()})
+		c.Abort()
+		return
+	}
+	if existingUser != nil {
+		c.JSON(http.StatusBadRequest, Response{Error: "Username already exists"})
+		c.Abort()
 		return
 	}
 
-	res.Data = user.UserID
-	c.JSON(200, res)
+	// Add user to database
+	_, err = repo.AddUser(c, &user)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, Response{Error: "Error adding user: " + err.Error()})
+		c.Abort()
+		return
+	}
 
-	log.Println("user inserted with id: ", insertID)
+	// Set the user ID in the context for the handler to use
+	c.Set("user_id", user.UserID)
+
+	res.Data = user.UserID
+	c.JSON(http.StatusOK, res)
 }
 
 // Retreive User
@@ -111,15 +118,18 @@ func (svc *UserService) UpdateUserPassword(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&bodyRequest); err != nil {
 		c.JSON(http.StatusBadRequest, Response{Error: "Error binding request: " + err.Error()})
+		return
 	}
-	// making sure password isn't empty in error
-	if bodyRequest.NewHashedPassword == "" {
-		c.JSON(http.StatusBadRequest, Response{Error: "Error retrieving hashed password"})
+
+	// Validate and hash the new password
+	hashedPassword, err := services.HashPassword(bodyRequest.NewHashedPassword)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, Response{Error: "Invalid password: " + err.Error()})
 		return
 	}
 
 	repo := repository.UsersRepo{MongoCollection: svc.MongoCollection}
-	modifiedCount, err := repo.UpdateUserPassword(userID, bodyRequest.NewHashedPassword)
+	modifiedCount, err := repo.UpdateUserPassword(userID, hashedPassword)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, Response{Error: "Error updating password: " + err.Error()})
 		return

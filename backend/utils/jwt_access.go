@@ -4,8 +4,6 @@ import (
 	"log"
 	"os"
 	"strconv"
-
-	"github.com/joho/godotenv"
 )
 
 var (
@@ -15,35 +13,44 @@ var (
 )
 
 func init() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env")
+
+	// For tests, use default values if environment variables aren't set
+	if os.Getenv("GO_ENV") == "test" {
+		if os.Getenv("JWT_SECRET_KEY") == "" {
+			os.Setenv("JWT_SECRET_KEY", "test_secret_key")
+		}
+		if os.Getenv("JWT_EXPIRATION_TIME") == "" {
+			os.Setenv("JWT_EXPIRATION_TIME", "3600")
+		}
+		if os.Getenv("REFRESH_TOKEN_EXPIRATION_TIME") == "" {
+			os.Setenv("REFRESH_TOKEN_EXPIRATION_TIME", "604800")
+		}
 	}
-	// getting secret key
+
+	// Get values from environment
 	JWTSecretKey = os.Getenv("JWT_SECRET_KEY")
 	if JWTSecretKey == "" {
-		log.Fatalf("Secret Key Read Error")
+		log.Fatal("JWT Secret Key not set")
 	}
 
-	// parsing duration into readable code
 	jwtExpiration := os.Getenv("JWT_EXPIRATION_TIME")
 	if jwtExpiration == "" {
-		log.Fatalf("Expiration Time Read Error")
+		log.Fatal("JWT Expiration Time not set")
 	}
 
+	var err error
 	JWTExpirationTime, err = strconv.ParseInt(jwtExpiration, 10, 64)
 	if err != nil {
-		log.Fatalf("Error parsing expiration duration")
+		log.Fatal("Error parsing JWT expiration time")
 	}
 
-	// parsing refresh
 	refreshToken := os.Getenv("REFRESH_TOKEN_EXPIRATION_TIME")
 	if refreshToken == "" {
-		log.Fatalf("Refresh Token Read Error")
+		log.Fatal("Refresh Token Expiration Time not set")
 	}
 
 	RefreshTokenExpirationTime, err = strconv.ParseInt(refreshToken, 10, 64)
 	if err != nil {
-		log.Fatalf("Error parsing refresh duration")
+		log.Fatal("Error parsing refresh token expiration time")
 	}
 }
