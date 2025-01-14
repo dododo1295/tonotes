@@ -12,10 +12,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// AuthMiddleware is a Gin middleware for JWT authentication
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Get the token from the Authorization header
+		// Get the token from the header
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing or invalid token"})
@@ -25,9 +24,9 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 
-		// Parse and validate the token
+		// validate the token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			// Ensure the signing method is HMAC
+			// making sure it's signed properly
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method")
 			}
