@@ -1,61 +1,20 @@
 package handler
 
 import (
-	"encoding/base64"
+	"context"
 	"fmt"
 	"net/http"
-	"strings"
+	"os"
 
 	"main/model"
-	"main/repository"
 	"main/services"
 	"main/utils"
 
 	"github.com/gin-gonic/gin"
-	"golang.org/x/crypto/argon2"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
-// verify inputed password hash is same as the hash in  DB
-func VerifyPassword(storedPassword, inputPassword string) (bool, error) {
-	// check if password stored properly
-	parts := strings.Split(storedPassword, "$")
-	if len(parts) != 2 {
-		return false, fmt.Errorf("invalid format")
-	}
-
-	// take out salt and hash
-	storedSalt, err := base64.RawStdEncoding.DecodeString(parts[0])
-	if err != nil {
-		return false, fmt.Errorf("failed to decode salt: %v", err)
-	}
-	storedHash, err := base64.RawStdEncoding.DecodeString(parts[1])
-	if err != nil {
-		return false, fmt.Errorf("failed to decode hash: %v", err)
-	}
-
-	// hash input password with my input salt to check
-	checkHash := argon2.IDKey([]byte(inputPassword), storedSalt, 3, 64*1024, 2, 32)
-	// check for parity
-	if !checkHashes(storedHash, checkHash) {
-		return false, nil
-	}
-
-	return true, nil
-}
-
-// compared inputed hash w/ storedHash
-func checkHashes(storedHash, checkHash []byte) bool {
-	if len(storedHash) != len(checkHash) {
-		return false
-	}
-	for i := range storedHash {
-		if storedHash[i] != checkHash[i] {
-			return false
-		}
-	}
-	return true
-}
-
+// LoginHandler handles user login requests
 func LoginHandler(c *gin.Context) {
 	var user model.User
 
@@ -66,41 +25,60 @@ func LoginHandler(c *gin.Context) {
 	}
 
 	// get user data from database
-
-	repo := &repository.UsersRepo{
-		MongoCollection: utils.MongoClient.Database("tonotes").Collection("users"),
+	dbName := "tonotes"
+	if os.Getenv("GO_ENV") == "test" {
+		dbName = "tonotes_test"
 	}
 
-	// look for user
-	fetchUser, err := repo.FindUserByUsername(user.Username)
-	if err != nil || fetchUser == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid  username"})
+	// Debug: Print the query we're using
+	fmt.Printf("Looking for user with username: %s in database: %s\n", user.Username, dbName)
+
+	// Find user directly using MongoDB client
+	var fetchUser model.User
+	err := utils.MongoClient.Database(dbName).Collection("users").
+		FindOne(context.Background(), bson.M{"username": user.Username}).
+		Decode(&fetchUser)
+
+	if err != nil {
+		fmt.Printf("Error finding user: %v\n", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username"})
 		return
 	}
 
+	// Debug: Print both passwords
+	fmt.Printf("Found user password: %s\n", fetchUser.Password)
+	fmt.Printf("Provided password: %s\n", user.Password)
+
 	// check password
-	checkPassword, err := VerifyPassword(fetchUser.Password, user.Password)
-	if err != nil || !checkPassword {
+	checkPassword, err := services.VerifyPassword(fetchUser.Password, user.Password)
+	if err != nil {
+		fmt.Printf("Password verification error: %v\n", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Incorrect Password"})
+		return
+	}
+	if !checkPassword {
+		fmt.Printf("Password verification failed\n")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Incorrect Password"})
 		return
 	}
 
-	// generate access token
-	accessToken, err := services.GenerateToken(fetchUser.UserID)
+	// Generate access token
+	token, err := services.GenerateToken(fetchUser.UserID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return
 	}
 
-	// generate refresh token
+	// Generate refresh token
 	refreshToken, err := services.GenerateRefreshToken(fetchUser.UserID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate refresh token"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate refresh token"})
 		return
 	}
 
-	// return the new token as response
-
-	c.JSON(http.StatusOK, gin.H{"access_token": accessToken,
-		"refresh_token": refreshToken})
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Login successful",
+		"token":   token,
+		"refresh": refreshToken,
+	})
 }
