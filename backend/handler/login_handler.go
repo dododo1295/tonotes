@@ -85,14 +85,22 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 
-	// generate token
-	token, err := services.GenerateJWT(fetchUser.UserID)
+	// generate access token
+	accessToken, err := services.GenerateToken(fetchUser.UserID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
 		return
 	}
 
+	// generate refresh token
+	refreshToken, err := services.GenerateRefreshToken(fetchUser.UserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate refresh token"})
+		return
+	}
+
 	// return the new token as response
 
-	c.JSON(http.StatusOK, gin.H{"token": token})
+	c.JSON(http.StatusOK, gin.H{"access_token": accessToken,
+		"refresh_token": refreshToken})
 }
