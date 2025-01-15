@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"main/model"
 
@@ -72,13 +73,17 @@ func (r *UsersRepo) UpdateUserPassword(userID string, hashedPassword string) (in
 		return 0, fmt.Errorf("password hashing error")
 	}
 	// filter the ID
-	filter := bson.D{{Key: "user_id", Value: userID}}
+	filter := bson.M{"user_id": userID}
 	// update time!
-	update := bson.D{{Key: "$set", Value: bson.D{{Key: "password", Value: hashedPassword}}}}
-
+	update := bson.M{
+		"$set": bson.M{
+			"password":           hashedPassword,
+			"lastPasswordChange": time.Now(),
+		},
+	}
 	result, err := r.MongoCollection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to update password: %w", err)
 	}
 	return result.ModifiedCount, nil
 }
@@ -109,4 +114,20 @@ func (r *UsersRepo) DeleteUserByID(userID string) (int64, error) {
 		return 0, err
 	}
 	return result.DeletedCount, nil
+}
+
+// Updating email
+func (r *UsersRepo) UpdateUserEmailByUsername(username string, email string) (int64, error) {
+	filter := bson.M{"username": username}
+	update := bson.M{
+		"$set": bson.M{
+			"email":           email,
+			"lastEmailChange": time.Now(),
+		},
+	}
+	result, err := r.MongoCollection.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return 0, fmt.Errorf("failed to update email: %w", err)
+	}
+	return result.ModifiedCount, nil
 }
