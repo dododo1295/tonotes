@@ -12,7 +12,7 @@ var (
 	RefreshTokenExpirationTime int64
 )
 
-func init() {
+func InitJWT() {
 
 	// For tests, use default values if environment variables aren't set
 	if os.Getenv("GO_ENV") == "test" {
