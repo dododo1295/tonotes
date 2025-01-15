@@ -19,7 +19,7 @@ func RegistrationHandler(c *gin.Context) {
 
 	// Debug logging
 	fmt.Printf("GO_ENV: %s\n", os.Getenv("GO_ENV"))
-	fmt.Printf("Database: %s\n", "tonotes_test")
+	fmt.Printf("Database: %s\n", os.Getenv("MONGO_DB"))
 
 	// Bind JSON and validate request
 	if err := c.ShouldBindJSON(&user); err != nil {
