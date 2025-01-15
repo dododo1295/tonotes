@@ -1,9 +1,10 @@
-package handler
+package test
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"main/handler"
 	"main/model"
 	"main/services"
 	"main/utils"
@@ -88,7 +89,7 @@ func TestLoginHandler(t *testing.T) {
 	r := gin.Default()
 
 	// Use the function directly - remove the handler struct
-	r.POST("/login", LoginHandler)
+	r.POST("/login", handler.LoginHandler)
 
 	// Test cases
 	tests := []struct {

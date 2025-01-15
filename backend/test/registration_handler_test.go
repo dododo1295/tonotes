@@ -1,9 +1,10 @@
-package handler
+package test
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"main/handler"
 	"main/utils"
 	"net/http"
 	"net/http/httptest"
@@ -65,19 +66,11 @@ func init() {
 	}
 }
 
-func clearTestDatabase(t *testing.T, client *mongo.Client) error {
-	ctx := context.Background()
-	err := client.Database("tonotes_test").Collection("users").Drop(ctx)
-	if err != nil {
-		// Ignore "namespace not found" errors as they just mean the collection doesn't exist yet
-		if cmdErr, ok := err.(mongo.CommandError); !ok || cmdErr.Name != "NamespaceNotFound" {
-			return fmt.Errorf("Failed to clear test database: %v", err)
-		}
-	}
-	return nil
-}
-
 func TestRegistrationHandler(t *testing.T) {
+	// Set environment variables
+	os.Setenv("GO_ENV", "test")
+	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
+
 	// Setup MongoDB connection
 	testClient, err := mongo.Connect(context.Background(),
 		options.Client().ApplyURI(os.Getenv("MONGO_URI")))
@@ -93,7 +86,7 @@ func TestRegistrationHandler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.POST("/register", RegistrationHandler)
+	router.POST("/register", handler.RegistrationHandler)
 
 	tests := []struct {
 		name          string

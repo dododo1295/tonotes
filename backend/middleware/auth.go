@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"main/services"
 	"main/utils"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,13 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+
+		// Check if token is blacklisted
+		if services.IsTokenBlacklisted(tokenString) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token has been invalidated"})
+			c.Abort()
+			return
+		}
 
 		// validate the token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {

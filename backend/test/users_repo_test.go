@@ -1,4 +1,4 @@
-package repository
+package test
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"main/model"
+	"main/repository"
 
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -48,7 +49,7 @@ func newMongoClient() *mongo.Client {
 	return mongoTestClient
 }
 
-func TestMongoOperations(t *testing.T) {
+func TestUserRepoOperations(t *testing.T) {
 	mongoTest := newMongoClient()
 	defer mongoTest.Disconnect(context.Background())
 
@@ -57,7 +58,7 @@ func TestMongoOperations(t *testing.T) {
 
 	coll := mongoTest.Database("tonotes").Collection("testUsers")
 
-	userRepo := UsersRepo{MongoCollection: coll}
+	userRepo := repository.UsersRepo{MongoCollection: coll}
 
 	// Adding Users!
 	t.Run("CreateUser", func(t *testing.T) {

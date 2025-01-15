@@ -1,8 +1,9 @@
-package handler
+package test
 
 import (
 	"encoding/json"
 	"fmt"
+	"main/handler"
 	"main/services"
 	"net/http"
 	"net/http/httptest"
@@ -53,7 +54,7 @@ func TestRefreshTokenHandler(t *testing.T) {
 	// Setup
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	r.POST("/refresh", RefreshTokenHandler)
+	r.POST("/refresh", handler.RefreshTokenHandler)
 
 	tests := []struct {
 		name          string
