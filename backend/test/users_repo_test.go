@@ -141,4 +141,13 @@ func TestUserRepoOperations(t *testing.T) {
 
 		t.Log("deleted!", result)
 	})
+
+	// updating email
+	t.Run("UpdateUserEmailByUsername", func(t *testing.T) {
+		result, err := userRepo.UpdateUserEmailByUsername("testUser", "testemail2@email.com")
+		if err != nil {
+			t.Fatal("failed to update email", err)
+		}
+		t.Log("email updated!", result)
+	})
 }

@@ -6,10 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"main/handler"
-
 	"main/model"
 	"main/repository"
-	"main/services"
 	"main/utils"
 	"net/http"
 	"net/http/httptest"
@@ -25,7 +23,7 @@ import (
 )
 
 func init() {
-	fmt.Println("Setting up change password test environment")
+	fmt.Println("Setting up change email test environment")
 	os.Setenv("GO_ENV", "test")
 	os.Setenv("JWT_SECRET_KEY", "test_secret_key")
 	os.Setenv("JWT_EXPIRATION_TIME", "3600")
@@ -34,19 +32,9 @@ func init() {
 	os.Setenv("USERS_COLLECTION", "users")
 }
 
-type ChangePasswordRequest struct {
-	OldPassword string `json:"old_password" binding:"required"`
-	NewPassword string `json:"new_password" binding:"required,password"`
-}
-
-func TestChangePasswordHandler(t *testing.T) {
-	// Additional environment setup
-	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
-	os.Setenv("MONGO_DB", "tonotes_test")
-	os.Setenv("USERS_COLLECTION", "users")
-
+func TestChangeEmailHandler(t *testing.T) {
 	// Initialize MongoDB client
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(os.Getenv("MONGO_URI")))
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://localhost:27017"))
 	if err != nil {
 		t.Fatalf("Failed to connect to MongoDB: %v", err)
 	}
@@ -56,17 +44,17 @@ func TestChangePasswordHandler(t *testing.T) {
 
 	// Create test user
 	testUserID := uuid.New().String()
-	oldPassword := "OldPass123!!"
-	hashedOldPassword, _ := services.HashPassword(oldPassword)
+	testUsername := "testuser"
+	initialEmail := "initial@example.com"
 	pastTime := time.Now().Add(-24 * time.Hour * 15) // 15 days ago
 
 	testUser := model.User{
-		UserID:             testUserID,
-		Username:           "testuser",
-		Email:              "test@example.com",
-		Password:           hashedOldPassword,
-		CreatedAt:          time.Now(),
-		LastPasswordChange: pastTime,
+		UserID:          testUserID,
+		Username:        testUsername,
+		Email:           initialEmail,
+		Password:        "hashedpassword",
+		CreatedAt:       time.Now(),
+		LastEmailChange: pastTime,
 	}
 
 	// Set up test database
@@ -81,15 +69,10 @@ func TestChangePasswordHandler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
-		token, err := services.GenerateToken(testUserID)
-		if err != nil {
-			t.Fatalf("Failed to generate token: %v", err)
-		}
-		c.Request.Header.Set("Authorization", "Bearer "+token)
-		c.Set("user_id", testUserID)
+		c.Set("username", testUsername)
 		c.Set("users_repo", &repository.UsersRepo{MongoCollection: collection})
 	})
-	router.POST("/change-password", handler.ChangePasswordHandler)
+	router.POST("/change-email", handler.ChangeEmailHandler)
 
 	tests := []struct {
 		name           string
@@ -99,69 +82,54 @@ func TestChangePasswordHandler(t *testing.T) {
 		expectedBody   map[string]string
 	}{
 		{
-			name: "Success - Valid password change",
+			name: "Success - Valid email change",
 			requestBody: map[string]string{
-				"old_password": oldPassword,
-				"new_password": "NewPass456!!",
+				"new_email": "newemail@example.com",
 			},
 			expectedStatus: http.StatusOK,
 			expectedBody: map[string]string{
-				"message": "Password updated successfully",
+				"message": "Email updated successfully",
 			},
 		},
 		{
-			name: "Failure - Same password",
+			name: "Failure - Same email",
 			requestBody: map[string]string{
-				"old_password": oldPassword,
-				"new_password": oldPassword,
+				"new_email": initialEmail,
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: map[string]string{
-				"error": "New password cannot be the same as current password",
+				"error": "New email is same as current email",
 			},
 		},
 		{
 			name: "Failure - Rate limit",
 			requestBody: map[string]string{
-				"old_password": oldPassword,
-				"new_password": "AnotherPass789!!",
+				"new_email": "another@example.com",
 			},
 			setupFunc: func() {
-				// Update LastPasswordChange to recent time
+				// Update LastEmailChange to recent time
 				_, err := collection.UpdateOne(
 					context.Background(),
-					bson.M{"user_id": testUserID},
-					bson.M{"$set": bson.M{"lastPasswordChange": time.Now()}},
+					bson.M{"username": testUsername},
+					bson.M{"$set": bson.M{"lastEmailChange": time.Now()}},
 				)
 				if err != nil {
-					t.Fatalf("Failed to update LastPasswordChange: %v", err)
+					t.Fatalf("Failed to update LastEmailChange: %v", err)
 				}
 			},
 			expectedStatus: http.StatusTooManyRequests,
 			expectedBody: map[string]string{
-				"error": "Password can only be changed every 2 weeks",
+				"error": "Email can only be changed every 2 weeks",
 			},
 		},
 		{
-			name: "Failure - Incorrect old password",
+			name: "Failure - Invalid email format",
 			requestBody: map[string]string{
-				"old_password": "WrongPass123!!",
-				"new_password": "NewPass789!!",
-			},
-			expectedStatus: http.StatusUnauthorized,
-			expectedBody: map[string]string{
-				"error": "Current password is incorrect",
-			},
-		},
-		{
-			name: "Failure - Invalid new password format",
-			requestBody: map[string]string{
-				"old_password": oldPassword,
-				"new_password": "weak",
+				"new_email": "invalid-email",
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody: map[string]string{
-				"error": "New password does not meet requirements",
+				"error": "Invalid email format",
 			},
 		},
 	}
@@ -171,10 +139,10 @@ func TestChangePasswordHandler(t *testing.T) {
 			// Reset user state before each test
 			_, err := collection.UpdateOne(
 				context.Background(),
-				bson.M{"user_id": testUserID},
+				bson.M{"username": testUsername},
 				bson.M{"$set": bson.M{
-					"password":           hashedOldPassword,
-					"lastPasswordChange": pastTime,
+					"email":           initialEmail,
+					"lastEmailChange": pastTime,
 				}},
 			)
 			if err != nil {
@@ -192,7 +160,7 @@ func TestChangePasswordHandler(t *testing.T) {
 			}
 
 			// Create request
-			req, _ := http.NewRequest("POST", "/change-password", bytes.NewBuffer(jsonBody))
+			req, _ := http.NewRequest("POST", "/change-email", bytes.NewBuffer(jsonBody))
 			req.Header.Set("Content-Type", "application/json")
 
 			// Create response recorder
