@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"time"
 
 	"main/utils"
@@ -32,7 +33,7 @@ func GenerateToken(userID string) (string, error) {
 }
 
 func GenerateRefreshToken(userID string) (string, error) {
-	expirationTime := time.Now().Add(time.Duration(utils.RefreshTokenExpirationTime))
+	expirationTime := time.Now().Add(time.Duration(utils.RefreshTokenExpirationTime) * time.Second)
 	claims := jwt.MapClaims{
 		"user_id": userID,
 		"exp":     expirationTime.Unix(),
@@ -46,4 +47,42 @@ func GenerateRefreshToken(userID string) (string, error) {
 		return "invalid refresh", err
 	}
 	return signedToken, nil
+}
+
+func ValidateRefreshToken(tokenString string) (string, error) {
+	// Parse the token
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Validate the signing method
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(utils.JWTSecretKey), nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	// Get the claims
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		// Check if it's a refresh token
+		if tokenType, ok := claims["type"].(string); !ok || tokenType != "refresh" {
+			return "", fmt.Errorf("invalid token type")
+		}
+
+		// Check expiration
+		if exp, ok := claims["exp"].(float64); ok {
+			if time.Now().Unix() > int64(exp) {
+				return "", fmt.Errorf("token has expired")
+			}
+		}
+
+		// Get and return the user ID
+		if userID, ok := claims["user_id"].(string); ok {
+			return userID, nil
+		}
+		return "", fmt.Errorf("invalid claims")
+	}
+
+	return "", fmt.Errorf("invalid refresh")
 }
