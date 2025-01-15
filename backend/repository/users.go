@@ -5,12 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"time"
 
 	"main/model"
-	"main/services"
-
-	"main/utils"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -26,14 +22,6 @@ func (r *UsersRepo) AddUser(ctx context.Context, user *model.User) (interface{},
 	if user.Username == "" || user.Password == "" {
 		return nil, errors.New("username and password required")
 	}
-	hashedPassword, err := services.HashPassword(user.Password)
-	if err != nil {
-		return nil, errors.New("failed to hash")
-	}
-
-	user.Password = hashedPassword
-
-	user.CreatedAt = time.Now()
 
 	result, err := r.MongoCollection.InsertOne(ctx, user)
 	if err != nil {
@@ -44,14 +32,11 @@ func (r *UsersRepo) AddUser(ctx context.Context, user *model.User) (interface{},
 
 // Finding via username
 func (r *UsersRepo) FindUserByUsername(username string) (*model.User, error) {
-	// Access the MongoDB collection using the global MongoClient
-	collection := utils.MongoClient.Database("tonotes").Collection("users")
-
 	var user model.User
-	filter := bson.D{{Key: "username", Value: username}} // Query filter
+	filter := bson.D{{Key: "username", Value: username}}
 
-	// Find the user by username
-	err := collection.FindOne(context.Background(), filter).Decode(&user)
+	// Find the user by username using the repo's collection
+	err := r.MongoCollection.FindOne(context.Background(), filter).Decode(&user)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, nil // User not found

@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -26,25 +27,14 @@ type Response struct {
 }
 
 // creating user and inserting uuid
-func (svc *UserService) CreateUser(c *gin.Context) {
-	res := &Response{}
-	var user model.User
-
-	if err := c.ShouldBindJSON(&user); err != nil {
-		c.JSON(http.StatusBadRequest, Response{Error: "Invalid input: " + err.Error()})
-		c.Abort()
-		return
-	}
-
+func (svc *UserService) CreateUser(c *gin.Context, user *model.User) error {
 	// Generate UUID for new user
 	user.UserID = uuid.NewString()
 
 	// Hash the password
 	hashedPassword, err := services.HashPassword(user.Password)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, Response{Error: "Password validation failed: " + err.Error()})
-		c.Abort()
-		return
+		return err
 	}
 	user.Password = hashedPassword
 
@@ -56,29 +46,19 @@ func (svc *UserService) CreateUser(c *gin.Context) {
 	// Check if username already exists
 	existingUser, err := repo.FindUserByUsername(user.Username)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, Response{Error: "Database error: " + err.Error()})
-		c.Abort()
-		return
+		return err
 	}
 	if existingUser != nil {
-		c.JSON(http.StatusBadRequest, Response{Error: "Username already exists"})
-		c.Abort()
-		return
+		return fmt.Errorf("username already exists")
 	}
 
 	// Add user to database
-	_, err = repo.AddUser(c, &user)
+	_, err = repo.AddUser(c, user)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, Response{Error: "Error adding user: " + err.Error()})
-		c.Abort()
-		return
+		return err
 	}
 
-	// Set the user ID in the context for the handler to use
-	c.Set("user_id", user.UserID)
-
-	res.Data = user.UserID
-	c.JSON(http.StatusOK, res)
+	return nil
 }
 
 // Retreive User
