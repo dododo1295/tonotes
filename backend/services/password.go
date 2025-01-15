@@ -67,6 +67,16 @@ func VerifyPassword(storedPassword, providedPassword string) (bool, error) {
 	return bytes.Equal(computedHash, storedHash), nil
 }
 
+// ComparePasswords compares a stored password hash with a plain-text password
+// Returns true if they match, false otherwise
+func ComparePasswords(storedHash, plainPassword string) bool {
+	match, err := VerifyPassword(storedHash, plainPassword)
+	if err != nil {
+		return false
+	}
+	return match
+}
+
 // CheckHashes compares two hashes securely
 func CheckHashes(a, b []byte) bool {
 	return bytes.Equal(a, b)
