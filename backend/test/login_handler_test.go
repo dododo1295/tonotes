@@ -55,7 +55,7 @@ func TestLoginHandler(t *testing.T) {
 	t.Log("Setting other environment variables")
 	envVars := map[string]string{
 		"MONGO_URI":                     "mongodb://localhost:27017",
-		"JWT_SECRET_KEY":                "test_secret",
+		"JWT_SECRET_KEY":                "test_secret_key",
 		"JWT_EXPIRATION_TIME":           "3600",
 		"REFRESH_TOKEN_EXPIRATION_TIME": "604800",
 		"MONGO_DB":                      "tonotes_test",
