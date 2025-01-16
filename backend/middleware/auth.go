@@ -32,9 +32,9 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// validate the token
+		// Validate the token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			// making sure it's signed properly
+			// Making sure it's signed properly
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method")
 			}
@@ -47,7 +47,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Extract claims
+		// Extract and validate claims
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok || claims["user_id"] == nil || claims["exp"] == nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
@@ -56,14 +56,23 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		// Check expiration
-		if exp, ok := claims["exp"].(float64); ok && time.Unix(int64(exp), 0).Before(time.Now()) {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token has expired"})
+		if exp, ok := claims["exp"].(float64); ok {
+			if time.Now().Unix() > int64(exp) {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Token has expired"})
+				c.Abort()
+				return
+			}
+		}
+
+		// Store user ID in the context
+		userID, ok := claims["user_id"].(string)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid user ID in token"})
 			c.Abort()
 			return
 		}
 
-		// Store user ID in the context
-		c.Set("user_id", claims["user_id"].(string))
+		c.Set("user_id", userID)
 		c.Next()
 	}
 }
