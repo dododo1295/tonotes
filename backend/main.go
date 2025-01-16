@@ -3,10 +3,11 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
+
 	"main/handler"
 	"main/middleware"
 	"main/utils"
-	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -46,6 +47,8 @@ func init() {
 			log.Fatalf("Required environment variable %s is not set", envVar)
 		}
 	}
+	utils.InitValidator()
+	// Initialize JWT
 	utils.InitJWT()
 	// Initialize MongoDB connection
 	utils.InitMongoClient()
