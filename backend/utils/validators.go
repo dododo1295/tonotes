@@ -1,13 +1,23 @@
 package utils
 
 import (
-	"regexp"
+	"unicode"
 
+	"github.com/gin-gonic/gin/binding"
 	"github.com/go-playground/validator/v10"
 )
 
 func RegisterCustomValidators(v *validator.Validate) {
 	v.RegisterValidation("password", ValidatePasswordRule)
+}
+
+var Validate *validator.Validate
+
+func InitValidator() {
+	Validate = validator.New()
+	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
+		v.RegisterValidation("password", ValidatePasswordRule)
+	}
 }
 
 func ValidatePasswordRule(fl validator.FieldLevel) bool {
@@ -16,25 +26,26 @@ func ValidatePasswordRule(fl validator.FieldLevel) bool {
 }
 
 func ValidatePassword(password string) bool {
-	// Check minimum length
+	// Password must:
+	// - Be at least 6 characters long
+	// - Contain at least one number
+	// - Contain at least one special character
+
+	hasNumber := false
+	hasSpecial := false
+
 	if len(password) < 6 {
 		return false
 	}
 
-	// Check for at least 1 uppercase and 1 lowercase
-	upperCase := regexp.MustCompile(`[A-Z]`)
-	lowerCase := regexp.MustCompile(`[a-z]`)
+	for _, char := range password {
+		switch {
+		case unicode.IsNumber(char):
+			hasNumber = true
+		case unicode.IsPunct(char) || unicode.IsSymbol(char):
+			hasSpecial = true
+		}
+	}
 
-	// Check for at least 2 numbers
-	numbers := regexp.MustCompile(`[0-9]`)
-	numberMatches := numbers.FindAllString(password, -1)
-
-	// Check for at least 2 special characters
-	special := regexp.MustCompile(`[!@#$%^&*(),.?":{}|<>]`)
-	specialMatches := special.FindAllString(password, -1)
-
-	return upperCase.MatchString(password) &&
-		lowerCase.MatchString(password) &&
-		len(numberMatches) >= 2 &&
-		len(specialMatches) >= 2
+	return hasNumber && hasSpecial
 }

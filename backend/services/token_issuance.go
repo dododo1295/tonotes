@@ -32,6 +32,49 @@ func GenerateToken(userID string) (string, error) {
 	return signedToken, nil
 }
 
+type TokenClaims struct {
+	UserID string `json:"user_id"`
+	jwt.RegisteredClaims
+}
+
+func ValidateToken(tokenString string) (string, error) {
+	// Parse the token
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Validate the signing method
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(utils.JWTSecretKey), nil
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("failed to parse token: %v", err)
+	}
+
+	// Check if token is blacklisted
+	if IsTokenBlacklisted(tokenString) {
+		return "", fmt.Errorf("token is blacklisted")
+	}
+
+	// Get the claims
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		// Check expiration
+		if exp, ok := claims["exp"].(float64); ok {
+			if time.Now().Unix() > int64(exp) {
+				return "", fmt.Errorf("token has expired")
+			}
+		}
+
+		// Get and return the user ID
+		if userID, ok := claims["user_id"].(string); ok {
+			return userID, nil
+		}
+		return "", fmt.Errorf("invalid claims")
+	}
+
+	return "", fmt.Errorf("invalid token")
+}
+
 func GenerateRefreshToken(userID string) (string, error) {
 	expirationTime := time.Now().Add(time.Duration(utils.RefreshTokenExpirationTime) * time.Second)
 	claims := jwt.MapClaims{
