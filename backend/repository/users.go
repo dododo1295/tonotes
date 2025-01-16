@@ -117,8 +117,9 @@ func (r *UsersRepo) DeleteUserByID(userID string) (int64, error) {
 }
 
 // Updating email
-func (r *UsersRepo) UpdateUserEmailByUsername(username string, email string) (int64, error) {
-	filter := bson.M{"username": username}
+
+func (r *UsersRepo) UpdateUserEmail(userID string, email string) (int64, error) {
+	filter := bson.M{"user_id": userID}
 	update := bson.M{
 		"$set": bson.M{
 			"email":           email,
