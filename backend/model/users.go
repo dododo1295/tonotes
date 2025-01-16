@@ -11,3 +11,8 @@ type User struct {
 	LastEmailChange    time.Time `bson:"lastEmailChange" json:"lastEmailChange"`                   // Track last email change for rate limiting
 	LastPasswordChange time.Time `bson:"lastPasswordChange" json:"lastPasswordChange"`             // Track last password change for rate limiting
 }
+
+type LoginRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}

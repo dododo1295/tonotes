@@ -16,10 +16,10 @@ import (
 
 // LoginHandler handles user login requests
 func LoginHandler(c *gin.Context) {
-	var user model.User
+	var loginReq model.LoginRequest
 
 	// bind to struct
-	if err := c.ShouldBindJSON(&user); err != nil {
+	if err := c.ShouldBindJSON(&loginReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Request"})
 		return
 	}
@@ -30,13 +30,13 @@ func LoginHandler(c *gin.Context) {
 		dbName = "tonotes_test"
 	}
 
-	// Debug: Print the query we're using
-	fmt.Printf("Looking for user with username: %s in database: %s\n", user.Username, dbName)
+	// Debug: Print the query
+	fmt.Printf("Looking for user with username: %s in database: %s\n", loginReq.Username, dbName)
 
 	// Find user directly using MongoDB client
 	var fetchUser model.User
 	err := utils.MongoClient.Database(dbName).Collection("users").
-		FindOne(context.Background(), bson.M{"username": user.Username}).
+		FindOne(context.Background(), bson.M{"username": loginReq.Username}).
 		Decode(&fetchUser)
 
 	if err != nil {
@@ -47,10 +47,10 @@ func LoginHandler(c *gin.Context) {
 
 	// Debug: Print both passwords
 	fmt.Printf("Found user password: %s\n", fetchUser.Password)
-	fmt.Printf("Provided password: %s\n", user.Password)
+	fmt.Printf("Provided password: %s\n", loginReq.Password)
 
 	// check password
-	checkPassword, err := services.VerifyPassword(fetchUser.Password, user.Password)
+	checkPassword, err := services.VerifyPassword(fetchUser.Password, loginReq.Password)
 	if err != nil {
 		fmt.Printf("Password verification error: %v\n", err)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Incorrect Password"})
