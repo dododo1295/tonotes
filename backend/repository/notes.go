@@ -223,3 +223,183 @@ func (r *NotesRepo) CountUserNotes(userID string) (int, error) {
 	}
 	return int(count), nil
 }
+
+func (r *NotesRepo) TogglePin(noteID string, userID string) error {
+	var note model.Notes
+	filter := bson.M{
+		"_id":     noteID,
+		"user_id": userID,
+	}
+
+	err := r.MongoCollection.FindOne(context.Background(), filter).Decode(&note)
+	if err != nil {
+		return err
+	}
+
+	update := bson.M{
+		"$set": bson.M{
+			"is_pinned":  !note.IsPinned,
+			"updated_at": time.Now(),
+		},
+	}
+
+	result, err := r.MongoCollection.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return err
+	}
+
+	if result.MatchedCount == 0 {
+		return errors.New("note not found")
+	}
+
+	return nil
+}
+
+// GetPinnedNotes retrieves all pinned notes for a user
+func (r *NotesRepo) GetPinnedNotes(userID string) ([]*model.Notes, error) {
+	var notes []*model.Notes
+	opts := options.Find().SetSort(bson.D{{Key: "updated_at", Value: -1}})
+
+	cursor, err := r.MongoCollection.Find(context.Background(),
+		bson.M{
+			"user_id":     userID,
+			"is_pinned":   true,
+			"is_archived": false,
+		}, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	if err = cursor.All(context.Background(), &notes); err != nil {
+		return nil, err
+	}
+	return notes, nil
+}
+
+func (r *NotesRepo) SearchByTags(userID string, tags []string) ([]*model.Notes, error) {
+	filter := bson.M{
+		"user_id":     userID,
+		"is_archived": false,
+		"tags": bson.M{
+			"$in": tags, // matches any of the tags in the array
+		},
+	}
+
+	var notes []*model.Notes
+	opts := options.Find().SetSort(bson.D{{Key: "updated_at", Value: -1}})
+
+	cursor, err := r.MongoCollection.Find(context.Background(), filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	if err = cursor.All(context.Background(), &notes); err != nil {
+		return nil, err
+	}
+	return notes, nil
+}
+
+// GetAllTags retrieves all unique tags used by a user
+func (r *NotesRepo) GetAllTags(userID string) ([]string, error) {
+	// Using MongoDB's distinct command to get unique tags
+	tags, err := r.MongoCollection.Distinct(
+		context.Background(),
+		"tags",
+		bson.M{"user_id": userID},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert interface{} array to string array
+	stringTags := make([]string, 0)
+	for _, tag := range tags {
+		if strTag, ok := tag.(string); ok {
+			stringTags = append(stringTags, strTag)
+		}
+	}
+
+	return stringTags, nil
+}
+
+func (r *NotesRepo) SearchByTagsWithOptions(userID string, tags []string, matchAll bool) ([]*model.Notes, error) {
+	var filter bson.M
+	if matchAll {
+		// Match all tags (AND operation)
+		filter = bson.M{
+			"user_id":     userID,
+			"is_archived": false,
+			"tags": bson.M{
+				"$all": tags,
+			},
+		}
+	} else {
+		// Match any tags (OR operation)
+		filter = bson.M{
+			"user_id":     userID,
+			"is_archived": false,
+			"tags": bson.M{
+				"$in": tags,
+			},
+		}
+	}
+
+	var notes []*model.Notes
+	opts := options.Find().SetSort(bson.D{{Key: "updated_at", Value: -1}})
+
+	cursor, err := r.MongoCollection.Find(context.Background(), filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	if err = cursor.All(context.Background(), &notes); err != nil {
+		return nil, err
+	}
+	return notes, nil
+}
+
+func (r *NotesRepo) CountNotesByTag(userID string) (map[string]int, error) {
+	pipeline := []bson.M{
+		{
+			"$match": bson.M{
+				"user_id":     userID,
+				"is_archived": false,
+			},
+		},
+		{
+			"$unwind": "$tags",
+		},
+		{
+			"$group": bson.M{
+				"_id":   "$tags",
+				"count": bson.M{"$sum": 1},
+			},
+		},
+	}
+
+	cursor, err := r.MongoCollection.Aggregate(context.Background(), pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	type tagCount struct {
+		ID    string `bson:"_id"`
+		Count int    `bson:"count"`
+	}
+
+	var results []tagCount
+	if err = cursor.All(context.Background(), &results); err != nil {
+		return nil, err
+	}
+
+	tagCounts := make(map[string]int)
+	for _, result := range results {
+		tagCounts[result.ID] = result.Count
+	}
+
+	return tagCounts, nil
+}
