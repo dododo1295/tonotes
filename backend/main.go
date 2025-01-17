@@ -7,6 +7,7 @@ import (
 
 	"main/handler"
 	"main/middleware"
+	"main/repository"
 	"main/utils"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +29,8 @@ func init() {
 		"JWT_SECRET_KEY",
 		"JWT_EXPIRATION_TIME",
 		"REFRESH_TOKEN_EXPIRATION_TIME",
+		"SESSION_COLLECTION",  // Added for sessions
+		"SESSION_DURATION",    // Added for sessions
 		"PORT",
 	}
 
@@ -58,8 +61,14 @@ func setupRouter() *gin.Engine {
 	// Create default gin router
 	router := gin.Default()
 
-	// Add CORS middleware if needed
+	// Initialize session repository
+	sessionRepo := repository.GetSessionRepo(utils.MongoClient)
+
+	// Add CORS middleware
 	router.Use(middleware.CORSMiddleware())
+
+	// Add session middleware
+	router.Use(middleware.SessionMiddleware(sessionRepo))
 
 	// Public routes (no authentication required)
 	public := router.Group("/api")
@@ -67,7 +76,10 @@ func setupRouter() *gin.Engine {
 		auth := public.Group("/auth")
 		{
 			auth.POST("/register", handler.RegistrationHandler)
-			auth.POST("/login", handler.LoginHandler)
+			// Inject session repo into login handler
+			auth.POST("/login", func(c *gin.Context) {
+				handler.LoginHandler(c, sessionRepo)
+			})
 		}
 	}
 
@@ -81,9 +93,22 @@ func setupRouter() *gin.Engine {
 			user.GET("/profile", handler.GetUserProfileHandler)
 			user.POST("/change-email", handler.ChangeEmailHandler)
 			user.POST("/change-password", handler.ChangePasswordHandler)
-			user.POST("/logout", handler.LogoutHandler)
+			// Inject session repo into logout handler
+			user.POST("/logout", func(c *gin.Context) {
+				handler.LogoutHandler(c, sessionRepo)
+			})
 			user.DELETE("/delete", handler.DeleteUserHandler)
+		}
 
+		// Session management endpoints
+		sessions := protected.Group("/sessions")
+		{
+			sessions.GET("/active", func(c *gin.Context) {
+				handler.GetActiveSessions(c, sessionRepo)
+			})
+			sessions.POST("/logout-all", func(c *gin.Context) {
+				handler.LogoutAllSessions(c, sessionRepo)
+			})
 		}
 
 		// Notes endpoints (to be implemented)
@@ -111,6 +136,7 @@ func setupRouter() *gin.Engine {
 func main() {
 	validate := validator.New()
 	validate.RegisterValidation("password", utils.ValidatePasswordRule)
+
 	// Set up router
 	router := setupRouter()
 

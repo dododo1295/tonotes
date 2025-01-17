@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"main/middleware"
 	"main/model"
 	"main/repository"
 	"main/services"
@@ -11,11 +12,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func LoginHandler(c *gin.Context) {
+func LoginHandler(c *gin.Context, sessionRepo *repository.SessionRepo) {
 	var loginReq model.LoginRequest
 
 	if err := c.ShouldBindJSON(&loginReq); err != nil {
-		utils.BadRequest(c, "Invalid Request") // Changed this line
+		utils.BadRequest(c, "Invalid Request")
 		return
 	}
 
@@ -62,6 +63,12 @@ func LoginHandler(c *gin.Context) {
 	refreshToken, err := services.GenerateRefreshToken(user.UserID)
 	if err != nil {
 		utils.InternalError(c, "Failed to generate refresh token")
+		return
+	}
+
+	// Create new session
+	if err := middleware.CreateSession(c, user.UserID, sessionRepo); err != nil {
+		utils.InternalError(c, "Failed to create session")
 		return
 	}
 

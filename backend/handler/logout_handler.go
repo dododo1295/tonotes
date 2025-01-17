@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"main/model"
+	"main/repository"
 	"main/services"
 	"strings"
 
@@ -11,7 +13,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func LogoutHandler(c *gin.Context) {
+func LogoutHandler(c *gin.Context, sessionRepo *repository.SessionRepo) {
 	// Get the access token from Authorization header
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
@@ -42,22 +44,20 @@ func LogoutHandler(c *gin.Context) {
 		return
 	}
 
-	// Validate refresh token format
-	_, err = jwt.Parse(refreshToken, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
+	// End the current session
+	if session, exists := c.Get("session"); exists {
+		currentSession := session.(*model.Session)
+		currentSession.IsActive = false
+		err := sessionRepo.UpdateSession(currentSession)
+		if err != nil {
+			utils.InternalError(c, "Failed to end session")
+			return
 		}
-		return []byte(utils.JWTSecretKey), nil
-	})
-
-	if err != nil {
-		utils.BadRequest(c, "Invalid refresh token")
-		return
 	}
 
-	// Both tokens are valid, now blacklist them
+	// Blacklist both tokens
 	if err := services.BlacklistTokens(accessToken, refreshToken); err != nil {
-		utils.InternalError(c, "Failed to logout")
+		utils.InternalError(c, "Failed to blacklist tokens")
 		return
 	}
 

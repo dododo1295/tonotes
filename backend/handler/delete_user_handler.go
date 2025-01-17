@@ -16,6 +16,12 @@ func DeleteUserHandler(c *gin.Context) {
 	}
 
 	userRepo := repository.GetUsersRepo(utils.MongoClient)
+	sessionRepo := repository.GetSessionRepo(utils.MongoClient)
+
+	// End all sessions for the user
+	if err := sessionRepo.DeleteUserSessions(userID.(string)); err != nil {
+		log.Printf("Error ending user sessions: %v", err)
+	}
 
 	deletedCount, err := userRepo.DeleteUserByID(userID.(string))
 	if err != nil {
@@ -28,6 +34,9 @@ func DeleteUserHandler(c *gin.Context) {
 		utils.NotFound(c, "User not found")
 		return
 	}
+
+	// Clear session cookie
+	c.SetCookie("session_id", "", -1, "/", "", true, true)
 
 	log.Printf("User deleted successfully: %s", userID)
 	utils.Success(c, gin.H{"message": "User deleted successfully"})

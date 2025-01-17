@@ -1,16 +1,23 @@
 package test
 
 import (
+	"context"
 	"encoding/json"
 	"main/handler"
+	"main/model"
+	"main/repository"
 	"main/services"
-	"main/utils"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func init() {
@@ -18,108 +25,141 @@ func init() {
 	os.Setenv("JWT_SECRET_KEY", "test_secret_key")
 }
 func TestLogoutHandler(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.POST("/logout", handler.LogoutHandler)
+    // Initialize MongoDB client
+    client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://localhost:27017"))
+    if err != nil {
+        t.Fatalf("Failed to connect to MongoDB: %v", err)
+    }
+    defer client.Disconnect(context.Background())
 
-	tests := []struct {
-		name          string
-		setupToken    func() (string, string)
-		expectedCode  int
-		checkResponse func(*testing.T, *httptest.ResponseRecorder)
-	}{
-		{
-			name: "Successful Logout",
-			setupToken: func() (string, string) {
-				accessToken, _ := services.GenerateToken("test-user-id")
-				refreshToken, _ := services.GenerateRefreshToken("test-user-id")
-				return accessToken, refreshToken
-			},
-			expectedCode: http.StatusOK,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var response utils.Response
-				err := json.Unmarshal(w.Body.Bytes(), &response)
-				if err != nil {
-					t.Fatalf("Failed to parse response: %v", err)
-				}
+    // Set up database
+    db := client.Database("tonotes_test")
+    sessionsCollection := db.Collection("sessions")
+    sessionRepo := &repository.SessionRepo{
+        MongoCollection: sessionsCollection,
+    }
 
-				data, ok := response.Data.(map[string]interface{})
-				if !ok {
-					t.Fatal("Response missing data object")
-				}
+    gin.SetMode(gin.TestMode)
 
-				if msg, ok := data["message"].(string); !ok || msg != "Successfully logged out" {
-					t.Errorf("Expected message 'Successfully logged out', got %q", msg)
-				}
-			},
-		},
-		{
-			name: "Missing Token",
-			setupToken: func() (string, string) {
-				return "", ""
-			},
-			expectedCode: http.StatusUnauthorized,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var response utils.Response
-				err := json.Unmarshal(w.Body.Bytes(), &response)
-				if err != nil {
-					t.Fatalf("Failed to parse response: %v", err)
-				}
+    tests := []struct {
+        name          string
+        setupAuth     func() (string, string, *model.Session)
+        expectedCode  int
+        checkResponse func(*testing.T, *httptest.ResponseRecorder, *model.Session)
+    }{
+        {
+            name: "Successful Logout",
+            setupAuth: func() (string, string, *model.Session) {
+                userID := "test-user-id"
+                accessToken, _ := services.GenerateToken(userID)
+                refreshToken, _ := services.GenerateRefreshToken(userID)
 
-				if response.Error != "Missing or invalid access token" {
-					t.Errorf("Expected error 'Missing or invalid access token', got %q", response.Error)
-				}
-			},
-		},
-		{
-			name: "Invalid Token Format",
-			setupToken: func() (string, string) {
-				return "invalid-token", "refresh-token"
-			},
-			expectedCode: http.StatusUnauthorized,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var response utils.Response
-				err := json.Unmarshal(w.Body.Bytes(), &response)
-				if err != nil {
-					t.Fatalf("Failed to parse response: %v", err)
-				}
+                session := &model.Session{
+                    SessionID:      uuid.New().String(),
+                    UserID:        userID,
+                    CreatedAt:     time.Now(),
+                    ExpiresAt:     time.Now().Add(24 * time.Hour),
+                    LastActivityAt: time.Now(),
+                    DeviceInfo:    "test device",
+                    IPAddress:     "127.0.0.1",
+                    IsActive:      true,
+                }
 
-				if response.Error != "Invalid access token" {
-					t.Errorf("Expected error 'Invalid access token', got %q", response.Error)
-				}
-			},
-		},
-	}
+                // Create session in database
+                _, err := sessionsCollection.InsertOne(context.Background(), session)
+                if err != nil {
+                    t.Fatalf("Failed to create session: %v", err)
+                }
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create request recorder
-			w := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+                return accessToken, refreshToken, session
+            },
+            expectedCode: http.StatusOK,
+            checkResponse: func(t *testing.T, w *httptest.ResponseRecorder, session *model.Session) {
+                // Verify response
+                var response map[string]interface{}
+                err := json.Unmarshal(w.Body.Bytes(), &response)
+                if err != nil {
+                    t.Fatalf("Failed to parse response: %v", err)
+                }
 
-			// Setup tokens
-			accessToken, refreshToken := tt.setupToken()
-			if accessToken != "" {
-				req.Header.Set("Authorization", "Bearer "+accessToken)
-			}
-			if refreshToken != "" {
-				req.Header.Set("Refresh-Token", refreshToken)
-			}
+                // Add delay to allow database operations to complete
+                time.Sleep(100 * time.Millisecond)
 
-			// Serve request
-			router.ServeHTTP(w, req)
+                // Check session status in database
+                var updatedSession model.Session
+                err = sessionsCollection.FindOne(context.Background(),
+                    bson.M{"session_id": session.SessionID}).Decode(&updatedSession)
+                if err != nil {
+                    t.Fatalf("Failed to find session: %v", err)
+                }
 
-			// Log response for debugging
-			t.Logf("Response Status: %d", w.Code)
-			t.Logf("Response Body: %s", w.Body.String())
+                if updatedSession.IsActive {
+                    t.Error("Session should be marked as inactive")
+                }
+            },
+        },
+        {
+            name: "Missing Token",
+            setupAuth: func() (string, string, *model.Session) {
+                return "", "", nil
+            },
+            expectedCode: http.StatusUnauthorized,
+            checkResponse: func(t *testing.T, w *httptest.ResponseRecorder, _ *model.Session) {
+                var response map[string]interface{}
+                json.Unmarshal(w.Body.Bytes(), &response)
+                if response["error"] != "Missing or invalid access token" {
+                    t.Errorf("Expected error 'Missing or invalid access token', got %v", response["error"])
+                }
+            },
+        },
+        {
+            name: "Invalid Token Format",
+            setupAuth: func() (string, string, *model.Session) {
+                return "invalid-token", "", nil
+            },
+            expectedCode: http.StatusUnauthorized,
+            checkResponse: func(t *testing.T, w *httptest.ResponseRecorder, _ *model.Session) {
+                var response map[string]interface{}
+                json.Unmarshal(w.Body.Bytes(), &response)
+                if response["error"] != "Invalid access token" {
+                    t.Errorf("Expected error 'Invalid access token', got %v", response["error"])
+                }
+            },
+        },
+    }
 
-			// Check status code
-			if w.Code != tt.expectedCode {
-				t.Errorf("Expected status code %d, got %d", tt.expectedCode, w.Code)
-			}
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            // Clear sessions collection before each test
+            sessionsCollection.Drop(context.Background())
 
-			// Run custom response checks
-			tt.checkResponse(t, w)
-		})
-	}
+            router := gin.New()
+            accessToken, refreshToken, session := tt.setupAuth()
+
+            router.POST("/logout", func(c *gin.Context) {
+                if session != nil {
+                    c.Set("session", session)
+                }
+                handler.LogoutHandler(c, sessionRepo)
+            })
+
+            w := httptest.NewRecorder()
+            req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+
+            if accessToken != "" {
+                req.Header.Set("Authorization", "Bearer "+accessToken)
+            }
+            if refreshToken != "" {
+                req.Header.Set("Refresh-Token", refreshToken)
+            }
+
+            router.ServeHTTP(w, req)
+
+            if w.Code != tt.expectedCode {
+                t.Errorf("Expected status code %d, got %d", tt.expectedCode, w.Code)
+            }
+
+            tt.checkResponse(t, w, session)
+        })
+    }
 }
