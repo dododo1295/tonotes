@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"main/middleware"
 	"main/services"
+	"main/utils"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +15,8 @@ import (
 
 func TestAuthMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	os.Setenv("JWT_SECRET_KEY", "test_secret_key")
+	utils.InitJWT()
 
 	tests := []struct {
 		name          string

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"main/model"
+	"main/repository"
 	"main/utils"
 	"net/http"
 	"os"
@@ -40,9 +41,12 @@ func RegistrationHandler(c *gin.Context) {
 	// Debug logging
 	fmt.Printf("Using database: %s\n", dbName)
 
+	// get users repository from database
+	userRepo := repository.GetUsersRepo(utils.MongoClient)
+
 	// Create user service with correct database
 	userService := &usecase.UserService{
-		MongoCollection: utils.MongoClient.Database(dbName).Collection("users"),
+		UsersRepo: userRepo,
 	}
 
 	// Create user

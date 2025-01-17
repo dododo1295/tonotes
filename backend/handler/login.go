@@ -1,56 +1,54 @@
 package handler
 
 import (
-	"context"
 	"fmt"
-	"net/http"
-	"os"
-
 	"main/model"
+	"main/repository"
 	"main/services"
+	"main/usecase"
 	"main/utils"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/bson"
 )
 
-// LoginHandler handles user login requests
 func LoginHandler(c *gin.Context) {
 	var loginReq model.LoginRequest
 
-	// bind to struct
+	// Bind JSON request
 	if err := c.ShouldBindJSON(&loginReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Request"})
 		return
 	}
 
-	// get user data from database
-	dbName := "tonotes"
-	if os.Getenv("GO_ENV") == "test" {
-		dbName = "tonotes_test"
+	// Debug: Print the query
+	fmt.Printf("Looking for user with username: %s\n", loginReq.Username)
+
+	// Get repository and create service
+	userRepo := repository.GetUsersRepo(utils.MongoClient)
+	userService := &usecase.UserService{
+		UsersRepo: userRepo,
 	}
 
-	// Debug: Print the query
-	fmt.Printf("Looking for user with username: %s in database: %s\n", loginReq.Username, dbName)
-
-	// Find user directly using MongoDB client
-	var fetchUser model.User
-	err := utils.MongoClient.Database(dbName).Collection("users").
-		FindOne(context.Background(), bson.M{"username": loginReq.Username}).
-		Decode(&fetchUser)
-
+	// Find user using service
+	user, err := userService.FindUserByUsername(loginReq.Username)
 	if err != nil {
 		fmt.Printf("Error finding user: %v\n", err)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username"})
 		return
 	}
 
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username"})
+		return
+	}
+
 	// Debug: Print both passwords
-	fmt.Printf("Found user password: %s\n", fetchUser.Password)
+	fmt.Printf("Found user password: %s\n", user.Password)
 	fmt.Printf("Provided password: %s\n", loginReq.Password)
 
-	// check password
-	checkPassword, err := services.VerifyPassword(fetchUser.Password, loginReq.Password)
+	// Check password
+	checkPassword, err := services.VerifyPassword(user.Password, loginReq.Password)
 	if err != nil {
 		fmt.Printf("Password verification error: %v\n", err)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Incorrect Password"})
@@ -63,14 +61,14 @@ func LoginHandler(c *gin.Context) {
 	}
 
 	// Generate access token
-	token, err := services.GenerateToken(fetchUser.UserID)
+	token, err := services.GenerateToken(user.UserID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return
 	}
 
 	// Generate refresh token
-	refreshToken, err := services.GenerateRefreshToken(fetchUser.UserID)
+	refreshToken, err := services.GenerateRefreshToken(user.UserID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate refresh token"})
 		return

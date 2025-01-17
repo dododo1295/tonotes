@@ -100,7 +100,6 @@ func TestRegistrationHandler(t *testing.T) {
 			name:      "Successful Registration",
 			inputJSON: `{"username":"testuser1234","password":"Test12!!@@","email":"test@example.com"}`,
 			setupFunc: func() error {
-				// Clear the test collection
 				return testClient.Database("tonotes_test").Collection("users").Drop(context.Background())
 			},
 			expectedCode: http.StatusCreated,
@@ -109,12 +108,9 @@ func TestRegistrationHandler(t *testing.T) {
 			name:      "Duplicate Username",
 			inputJSON: `{"username":"existinguser","password":"Test12!!@@","email":"another@example.com"}`,
 			setupFunc: func() error {
-				// Clear collection first
 				if err := testClient.Database("tonotes_test").Collection("users").Drop(context.Background()); err != nil {
 					return err
 				}
-
-				// Insert test user
 				_, err := testClient.Database("tonotes_test").Collection("users").InsertOne(
 					context.Background(),
 					bson.M{
@@ -131,8 +127,20 @@ func TestRegistrationHandler(t *testing.T) {
 			expectedError: "username already exists",
 		},
 		{
-			name:          "Invalid Password Format",
-			inputJSON:     `{"username":"testuser1234","password":"ValidPass123!","email":"test@example.com"}`,
+			name:          "Invalid Password - Too Short",
+			inputJSON:     `{"username":"testuser1234","password":"a!1","email":"test@example.com"}`,
+			expectedCode:  http.StatusBadRequest,
+			expectedError: "invalid request",
+		},
+		{
+			name:          "Invalid Password - No Number",
+			inputJSON:     `{"username":"testuser1234","password":"abcdef!!","email":"test@example.com"}`,
+			expectedCode:  http.StatusBadRequest,
+			expectedError: "invalid request",
+		},
+		{
+			name:          "Invalid Password - No Special Character",
+			inputJSON:     `{"username":"testuser1234","password":"abcdef123","email":"test@example.com"}`,
 			expectedCode:  http.StatusBadRequest,
 			expectedError: "invalid request",
 		},

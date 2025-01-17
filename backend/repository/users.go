@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"main/model"
@@ -12,6 +13,18 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
+
+// get usersrepo from database
+var mongoClient *mongo.Client
+
+// Constructor function for UsersRepo
+func GetUsersRepo(client *mongo.Client) *UsersRepo {
+	dbName := os.Getenv("MONGO_DB")
+	collectionName := os.Getenv("USERS_COLLECTION")
+	return &UsersRepo{
+		MongoCollection: client.Database(dbName).Collection(collectionName),
+	}
+}
 
 // Getting DB
 type UsersRepo struct {

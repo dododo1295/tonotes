@@ -9,16 +9,14 @@ import (
 	"main/model"
 	"main/repository"
 	"main/services"
+	"main/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// NOTE: This repo STILL does not have the ability to find username via email
-
 type UserService struct {
-	MongoCollection *mongo.Collection
+	UsersRepo *repository.UsersRepo
 }
 
 type Response struct {
@@ -36,15 +34,14 @@ func (svc *UserService) CreateUser(c *gin.Context, user *model.User) error {
 	if err != nil {
 		return err
 	}
+	//set password
 	user.Password = hashedPassword
 
 	// Set creation time
 	user.CreatedAt = time.Now()
 
-	repo := repository.UsersRepo{MongoCollection: svc.MongoCollection}
-
 	// Check if username already exists
-	existingUser, err := repo.FindUserByUsername(user.Username)
+	existingUser, err := svc.UsersRepo.FindUserByUsername(user.Username)
 	if err != nil {
 		return err
 	}
@@ -53,7 +50,7 @@ func (svc *UserService) CreateUser(c *gin.Context, user *model.User) error {
 	}
 
 	// Add user to database
-	_, err = repo.AddUser(c, user)
+	_, err = svc.UsersRepo.AddUser(c, user)
 	if err != nil {
 		return err
 	}
@@ -61,68 +58,56 @@ func (svc *UserService) CreateUser(c *gin.Context, user *model.User) error {
 	return nil
 }
 
-// Retreive User
-func (svc *UserService) GetUserID(c *gin.Context) {
-	res := &Response{}
-
-	// Get the users ID
-	userID := c.Param("user_id")
-
-	log.Println("user ID: ", userID)
-
-	repo := repository.UsersRepo{MongoCollection: svc.MongoCollection}
-
-	user, err := repo.FindUser(userID)
-	if err != nil {
-		c.JSON(400, Response{Error: "Could not find user: " + err.Error()})
-		log.Println("Could not find user: ", err)
-
-		return
+func (svc *UserService) GetUserProfile(userID string) (*model.UserProfile, error) {
+	if userID == "" {
+		return nil, fmt.Errorf("invalid user id")
 	}
-	res.Data = user
-	c.JSON(http.StatusOK, res)
+
+	user, err := svc.UsersRepo.FindUser(userID)
+	if err != nil {
+		return nil, fmt.Errorf("could not find user: %w", err)
+	}
+	if user == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	return &model.UserProfile{
+		Username:  user.Username,
+		Email:     user.Email,
+		CreatedAt: user.CreatedAt,
+	}, nil
 }
 
-func (svc *UserService) UpdateUserPassword(c *gin.Context) {
-	res := &Response{}
-
-	// getting the user ID
-	userID := c.Param("user_id")
-	if userID == "" {
-		c.JSON(http.StatusBadRequest, Response{Error: "userID is required"})
-		return
+func (svc *UserService) UpdateUserPassword(userID string, oldPassword, newPassword string) error {
+	// Business logic only
+	user, err := svc.UsersRepo.FindUser(userID)
+	if err != nil || user == nil {
+		return fmt.Errorf("user not found")
 	}
 
-	var bodyRequest struct {
-		NewHashedPassword string `json:"new_password"`
-	}
-	if err := c.ShouldBindJSON(&bodyRequest); err != nil {
-		c.JSON(http.StatusBadRequest, Response{Error: "Error binding request: " + err.Error()})
-		return
+	if !services.ComparePasswords(user.Password, oldPassword) {
+		return fmt.Errorf("current password incorrect")
 	}
 
-	// Validate and hash the new password
-	hashedPassword, err := services.HashPassword(bodyRequest.NewHashedPassword)
+	if !utils.ValidatePassword(newPassword) {
+		return fmt.Errorf("password does not meet requirements")
+	}
+
+	if services.ComparePasswords(user.Password, newPassword) {
+		return fmt.Errorf("new password same as current")
+	}
+
+	if time.Since(user.LastPasswordChange) < 14*24*time.Hour {
+		return fmt.Errorf("password can only be changed every 2 weeks")
+	}
+
+	hashedPassword, err := services.HashPassword(newPassword)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, Response{Error: "Invalid password: " + err.Error()})
-		return
+		return fmt.Errorf("failed to process new password: %w", err)
 	}
 
-	repo := repository.UsersRepo{MongoCollection: svc.MongoCollection}
-	modifiedCount, err := repo.UpdateUserPassword(userID, hashedPassword)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, Response{Error: "Error updating password: " + err.Error()})
-		return
-	}
-
-	// off chance the userID isn't working
-	if modifiedCount == 0 {
-		c.JSON(http.StatusNotFound, Response{Error: "User ID could not be found"})
-		return
-	}
-
-	res.Data = "password successfully changed"
-	c.JSON(http.StatusOK, res)
+	_, err = svc.UsersRepo.UpdateUserPassword(userID, hashedPassword)
+	return err
 }
 
 func (svc *UserService) UpdateUserByID(c *gin.Context) {
@@ -147,8 +132,7 @@ func (svc *UserService) UpdateUserByID(c *gin.Context) {
 
 	user.UserID = userID
 
-	repo := repository.UsersRepo{MongoCollection: svc.MongoCollection}
-	count, err := repo.UpdateUserByID(userID, &user)
+	count, err := svc.UsersRepo.UpdateUserByID(userID, &user)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, Response{Error: "could not update user name"})
 		log.Println("error updating usernmae")
@@ -159,34 +143,7 @@ func (svc *UserService) UpdateUserByID(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
-func (svc *UserService) DeleteUser(c *gin.Context) {
-	c.Header("Content-Type", "application/json")
-	res := &Response{}
-
-	userID := c.Param("user_id")
-
-	log.Println("user id: ", userID)
-
-	if userID == "" {
-		c.JSON(http.StatusBadRequest, Response{Error: "invalid user id"})
-		log.Println("invalid user ID")
-		return
-	}
-
-	var user model.User
-	if err := c.ShouldBindJSON(&user); err != nil {
-		c.JSON(http.StatusBadRequest, Response{Error: "could not bind: " + err.Error()})
-		log.Println("error decoding")
-		return
-	}
-
-	repo := repository.UsersRepo{MongoCollection: svc.MongoCollection}
-
-	count, err := repo.DeleteUserByID(userID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "could not delete user: ", "details": err.Error()})
-	}
-
-	res.Data = count
-	c.JSON(http.StatusOK, res)
+func (svc *UserService) FindUserByUsername(username string) (*model.User, error) {
+	// Here you could add business logic before/after the database call
+	return svc.UsersRepo.FindUserByUsername(username)
 }
