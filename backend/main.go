@@ -78,9 +78,12 @@ func setupRouter() *gin.Engine {
 		// User management
 		user := protected.Group("/user")
 		{
+			user.GET("/profile", handler.GetUserProfileHandler)
 			user.POST("/change-email", handler.ChangeEmailHandler)
 			user.POST("/change-password", handler.ChangePasswordHandler)
 			user.POST("/logout", handler.LogoutHandler)
+			user.DELETE("/delete", handler.DeleteUserHandler)
+
 		}
 
 		// Notes endpoints (to be implemented)

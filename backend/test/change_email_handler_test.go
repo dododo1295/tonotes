@@ -18,180 +18,245 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func init() {
-    fmt.Println("Setting up change email test environment")
-    os.Setenv("GO_ENV", "test")
-    os.Setenv("JWT_SECRET_KEY", "test_secret_key")
-    os.Setenv("JWT_EXPIRATION_TIME", "3600")
-    os.Setenv("REFRESH_TOKEN_EXPIRATION_TIME", "604800")
-    os.Setenv("MONGO_DB", "tonotes_test")
-    os.Setenv("USERS_COLLECTION", "users")
+	fmt.Println("Setting up change email test environment")
+	os.Setenv("GO_ENV", "test")
+	os.Setenv("JWT_SECRET_KEY", "test_secret_key")
+	os.Setenv("JWT_EXPIRATION_TIME", "3600")
+	os.Setenv("REFRESH_TOKEN_EXPIRATION_TIME", "604800")
+	os.Setenv("MONGO_DB", "tonotes_test")
+	os.Setenv("USERS_COLLECTION", "users")
 }
 
 func TestChangeEmailHandler(t *testing.T) {
-    // Initialize MongoDB client
-    client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://localhost:27017"))
-    if err != nil {
-        t.Fatalf("Failed to connect to MongoDB: %v", err)
-    }
-    defer client.Disconnect(context.Background())
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://localhost:27017"))
+	if err != nil {
+		t.Fatalf("Failed to connect to MongoDB: %v", err)
+	}
+	defer client.Disconnect(context.Background())
 
-    utils.MongoClient = client
+	utils.MongoClient = client
 
-    // Create test user
-    testUserID := uuid.New().String()
-    testUsername := "testuser"
-    initialEmail := "initial@example.com"
-    pastTime := time.Now().Add(-24 * time.Hour * 15) // 15 days ago
+	gin.SetMode(gin.TestMode)
 
-    testUser := model.User{
-        UserID:          testUserID,
-        Username:        testUsername,
-        Email:           initialEmail,
-        Password:        "hashedpassword",
-        CreatedAt:       time.Now(),
-        LastEmailChange: pastTime,
-    }
+	tests := []struct {
+		name          string
+		setupAuth     func() string
+		requestBody   map[string]interface{}
+		expectedCode  int
+		setupTestData func(t *testing.T, userRepo *repository.UsersRepo) string
+		checkResponse func(*testing.T, *httptest.ResponseRecorder)
+	}{
+		{
+			name: "Success - Valid email change",
+			setupAuth: func() string {
+				token, _ := services.GenerateToken("test-user-id")
+				return token
+			},
+			requestBody: map[string]interface{}{
+				"new_email": "newemail@example.com",
+			},
+			expectedCode: http.StatusOK,
+			setupTestData: func(t *testing.T, userRepo *repository.UsersRepo) string {
+				userID := uuid.New().String()
+				user := &model.User{
+					UserID:          userID,
+					Email:           "old@example.com",
+					Username:        "testuser",
+					Password:        "password",
+					CreatedAt:       time.Now(),
+					LastEmailChange: time.Now().Add(-15 * 24 * time.Hour), // 15 days ago
+				}
+				_, err := userRepo.AddUser(context.Background(), user)
+				if err != nil {
+					t.Fatalf("Failed to create test user: %v", err)
+				}
+				return userID
+			},
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
 
-    // Set up test database
-    collection := client.Database("tonotes_test").Collection("users")
-    _, err = collection.InsertOne(context.Background(), testUser)
-    if err != nil {
-        t.Fatalf("Failed to insert test user: %v", err)
-    }
-    defer collection.DeleteMany(context.Background(), bson.M{})
+				data, ok := response.Data.(map[string]interface{})
+				if !ok {
+					t.Fatal("Response missing data object")
+				}
 
-    // Set up Gin router
-    gin.SetMode(gin.TestMode)
-    router := gin.New()
-    router.Use(func(c *gin.Context) {
-        // Add auth token setup
-        token, _ := services.GenerateToken(testUserID)
-        c.Request.Header.Set("Authorization", "Bearer "+token)
-        c.Set("user_id", testUserID)
-        c.Set("username", testUsername)
-        c.Set("users_repo", &repository.UsersRepo{MongoCollection: collection})
-    })
-    router.POST("/change-email", handler.ChangeEmailHandler)
+				if msg, ok := data["message"].(string); !ok || msg != "Email updated successfully" {
+					t.Errorf("Expected message 'Email updated successfully', got %q", msg)
+				}
 
-    tests := []struct {
-        name           string
-        requestBody    map[string]string
-        setupFunc      func()
-        expectedStatus int
-        expectedBody   map[string]string
-    }{
-        {
-            name: "Success - Valid email change",
-            requestBody: map[string]string{
-                "new_email": "newemail@example.com",
-            },
-            expectedStatus: http.StatusOK,
-            expectedBody: map[string]string{
-                "message": "Email updated successfully",
-            },
-        },
-        {
-            name: "Failure - Same email",
-            requestBody: map[string]string{
-                "new_email": initialEmail,
-            },
-            expectedStatus: http.StatusBadRequest,
-            expectedBody: map[string]string{
-                "error": "New email is same as current email",
-            },
-        },
-        {
-            name: "Failure - Rate limit",
-            requestBody: map[string]string{
-                "new_email": "another@example.com",
-            },
-            setupFunc: func() {
-                _, err := collection.UpdateOne(
-                    context.Background(),
-                    bson.M{"username": testUsername},
-                    bson.M{"$set": bson.M{"lastEmailChange": time.Now()}},
-                )
-                if err != nil {
-                    t.Fatalf("Failed to update LastEmailChange: %v", err)
-                }
-            },
-            expectedStatus: http.StatusTooManyRequests,
-            expectedBody: map[string]string{
-                "error": "Email can only be changed every 2 weeks",
-            },
-        },
-        {
-            name: "Failure - Invalid email format",
-            requestBody: map[string]string{
-                "new_email": "invalid-email",
-            },
-            expectedStatus: http.StatusBadRequest,
-            expectedBody: map[string]string{
-                "error": "Invalid email format",
-            },
-        },
-    }
+				if email, ok := data["email"].(string); !ok || email != "newemail@example.com" {
+					t.Errorf("Expected email 'newemail@example.com', got %q", email)
+				}
+			},
+		},
+		{
+			name: "Failure - Same email",
+			setupAuth: func() string {
+				token, _ := services.GenerateToken("test-user-id")
+				return token
+			},
+			requestBody: map[string]interface{}{
+				"new_email": "old@example.com",
+			},
+			expectedCode: http.StatusBadRequest,
+			setupTestData: func(t *testing.T, userRepo *repository.UsersRepo) string {
+				userID := uuid.New().String()
+				user := &model.User{
+					UserID:          userID,
+					Email:           "old@example.com",
+					Username:        "testuser",
+					Password:        "password",
+					CreatedAt:       time.Now(),
+					LastEmailChange: time.Now().Add(-15 * 24 * time.Hour),
+				}
+				_, err := userRepo.AddUser(context.Background(), user)
+				if err != nil {
+					t.Fatalf("Failed to create test user: %v", err)
+				}
+				return userID
+			},
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
 
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            // Reset user state before each test
-            _, err := collection.UpdateOne(
-                context.Background(),
-                bson.M{"username": testUsername},
-                bson.M{"$set": bson.M{
-                    "email":           initialEmail,
-                    "lastEmailChange": pastTime,
-                }},
-            )
-            if err != nil {
-                t.Fatalf("Failed to reset user state: %v", err)
-            }
+				if response.Error != "New email is same as current email" {
+					t.Errorf("Expected error 'New email is same as current email', got %q", response.Error)
+				}
+			},
+		},
+		{
+			name: "Failure - Rate limit",
+			setupAuth: func() string {
+				token, _ := services.GenerateToken("test-user-id")
+				return token
+			},
+			requestBody: map[string]interface{}{
+				"new_email": "newemail@example.com",
+			},
+			expectedCode: http.StatusTooManyRequests,
+			setupTestData: func(t *testing.T, userRepo *repository.UsersRepo) string {
+				userID := uuid.New().String()
+				user := &model.User{
+					UserID:          userID,
+					Email:           "old@example.com",
+					Username:        "testuser",
+					Password:        "password",
+					CreatedAt:       time.Now(),
+					LastEmailChange: time.Now(), // Recent change
+				}
+				_, err := userRepo.AddUser(context.Background(), user)
+				if err != nil {
+					t.Fatalf("Failed to create test user: %v", err)
+				}
+				return userID
+			},
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
 
-            if tt.setupFunc != nil {
-                tt.setupFunc()
-            }
+				if response.Error != "Email can only be changed every 2 weeks" {
+					t.Errorf("Expected error 'Email can only be changed every 2 weeks', got %q", response.Error)
+				}
 
-            // Convert request body to JSON
-            jsonBody, err := json.Marshal(tt.requestBody)
-            if err != nil {
-                t.Fatalf("Failed to marshal request body: %v", err)
-            }
+				data, ok := response.Data.(map[string]interface{})
+				if !ok || data["next_allowed_change"] == nil {
+					t.Error("Response missing next_allowed_change time")
+				}
+			},
+		},
+		{
+			name: "Failure - Invalid email format",
+			setupAuth: func() string {
+				token, _ := services.GenerateToken("test-user-id")
+				return token
+			},
+			requestBody: map[string]interface{}{
+				"new_email": "invalid-email",
+			},
+			expectedCode: http.StatusBadRequest,
+			setupTestData: func(t *testing.T, userRepo *repository.UsersRepo) string {
+				userID := uuid.New().String()
+				user := &model.User{
+					UserID:          userID,
+					Email:           "old@example.com",
+					Username:        "testuser",
+					Password:        "password",
+					CreatedAt:       time.Now(),
+					LastEmailChange: time.Now().Add(-15 * 24 * time.Hour),
+				}
+				_, err := userRepo.AddUser(context.Background(), user)
+				if err != nil {
+					t.Fatalf("Failed to create test user: %v", err)
+				}
+				return userID
+			},
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
 
-            // Create request
-            req, _ := http.NewRequest("POST", "/change-email", bytes.NewBuffer(jsonBody))
-            req.Header.Set("Content-Type", "application/json")
+				if response.Error != "Invalid email format" {
+					t.Errorf("Expected error 'Invalid email format', got %q", response.Error)
+				}
+			},
+		},
+	}
 
-            // Create response recorder
-            w := httptest.NewRecorder()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clear users collection
+			if err := client.Database("tonotes_test").Collection("users").Drop(context.Background()); err != nil {
+				t.Fatalf("Failed to clear users collection: %v", err)
+			}
 
-            // Serve request
-            router.ServeHTTP(w, req)
+			userRepo := repository.GetUsersRepo(utils.MongoClient)
+			userID := tt.setupTestData(t, userRepo)
 
-            // Check status code
-            if w.Code != tt.expectedStatus {
-                t.Errorf("Expected status %d, got %d", tt.expectedStatus, w.Code)
-            }
+			// Create request
+			jsonBody, _ := json.Marshal(tt.requestBody)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest("POST", "/change-email", bytes.NewBuffer(jsonBody))
+			req.Header.Set("Content-Type", "application/json")
 
-            // Parse response body
-            var response map[string]string
-            if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-                t.Fatalf("Failed to unmarshal response body: %v", err)
-            }
+			// Set up authentication
+			if token := tt.setupAuth(); token != "" {
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
 
-            // Check response message
-            if tt.expectedBody != nil {
-                for key, expectedValue := range tt.expectedBody {
-                    if actualValue, exists := response[key]; !exists || actualValue != expectedValue {
-                        t.Errorf("Expected response body to contain %s: %s, got %s", key, expectedValue, actualValue)
-                    }
-                }
-            }
-        })
-    }
+			// Set up context
+			router := gin.New()
+			router.POST("/change-email", func(c *gin.Context) {
+				c.Set("user_id", userID)
+				handler.ChangeEmailHandler(c)
+			})
+
+			// Serve request
+			router.ServeHTTP(w, req)
+
+			// Check status code
+			if w.Code != tt.expectedCode {
+				t.Errorf("Expected status code %d, got %d", tt.expectedCode, w.Code)
+			}
+
+			// Run custom response checks
+			tt.checkResponse(t, w)
+		})
+	}
 }

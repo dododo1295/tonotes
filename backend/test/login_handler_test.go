@@ -39,48 +39,31 @@ func init() {
 }
 
 func TestLoginHandler(t *testing.T) {
-	fmt.Println("Starting TestLoginHandler")
-	t.Log("Test starting...")
-
-	fmt.Printf("GO_ENV value: %s\n", os.Getenv("GO_ENV"))
-
-	envVars := map[string]string{
-		"MONGO_URI":                     "mongodb://localhost:27017",
-		"JWT_SECRET_KEY":                "test_secret_key",
-		"JWT_EXPIRATION_TIME":           "3600",
-		"REFRESH_TOKEN_EXPIRATION_TIME": "604800",
-		"MONGO_DB":                      "tonotes_test",
-		"USERS_COLLECTION":              "users",
-	}
-
-	for key, value := range envVars {
-		t.Logf("Setting %s=%s", key, value)
-		os.Setenv(key, value)
-	}
-
-	testClient, err := mongo.Connect(context.Background(),
-		options.Client().ApplyURI(os.Getenv("MONGO_URI")))
+	// Initialize MongoDB client
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://localhost:27017"))
 	if err != nil {
-		t.Fatalf("Failed to connect to test database: %v", err)
+		t.Fatalf("Failed to connect to MongoDB: %v", err)
 	}
-	defer testClient.Disconnect(context.Background())
+	defer client.Disconnect(context.Background())
 
-	utils.MongoClient = testClient
+	utils.MongoClient = client
 
-	if err := testClient.Database("tonotes_test").Collection("users").Drop(context.Background()); err != nil {
+	// Clear test database before starting
+	if err := client.Database("tonotes_test").Collection("users").Drop(context.Background()); err != nil {
 		t.Fatalf("Failed to clear test database: %v", err)
 	}
 
+	// Set up Gin router
 	gin.SetMode(gin.TestMode)
-	r := gin.Default()
-	r.POST("/login", handler.LoginHandler)
+	router := gin.Default()
+	router.POST("/login", handler.LoginHandler)
 
 	tests := []struct {
 		name          string
 		inputJSON     string
 		expectedCode  int
-		expectedError string
 		setupMockDB   func(t *testing.T, userRepo *repository.UsersRepo)
+		checkResponse func(*testing.T, *httptest.ResponseRecorder)
 	}{
 		{
 			name: "Successful Login",
@@ -107,15 +90,27 @@ func TestLoginHandler(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Failed to insert test user: %v", err)
 				}
-
-				storedUser, err := userRepo.FindUserByUsername("testuser")
+			},
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				err := json.Unmarshal(w.Body.Bytes(), &response)
 				if err != nil {
-					t.Fatalf("Failed to retrieve test user: %v", err)
+					t.Fatalf("Failed to parse response: %v", err)
 				}
 
-				if hashedPass != storedUser.Password {
-					t.Fatalf("Password mismatch after storage:\nOriginal: %s\nStored: %s",
-						hashedPass, storedUser.Password)
+				data, ok := response.Data.(map[string]interface{})
+				if !ok {
+					t.Fatal("Response missing data object")
+				}
+
+				if _, hasToken := data["token"]; !hasToken {
+					t.Error("Response missing token")
+				}
+				if _, hasRefresh := data["refresh"]; !hasRefresh {
+					t.Error("Response missing refresh token")
+				}
+				if msg, ok := data["message"].(string); !ok || msg != "Login successful" {
+					t.Errorf("Expected message 'Login successful', got %q", msg)
 				}
 			},
 		},
@@ -125,8 +120,7 @@ func TestLoginHandler(t *testing.T) {
 				"username": "testuser",
 				"password": "Test12!!##"
 			}`,
-			expectedCode:  http.StatusUnauthorized,
-			expectedError: "Incorrect Password",
+			expectedCode: http.StatusUnauthorized,
 			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
 				hashedPass, _ := services.HashPassword("Test12!!@@")
 				testUser := model.User{
@@ -141,6 +135,17 @@ func TestLoginHandler(t *testing.T) {
 					t.Fatalf("Failed to insert test user: %v", err)
 				}
 			},
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				if response.Error != "Incorrect Password" {
+					t.Errorf("Expected error 'Incorrect Password', got %q", response.Error)
+				}
+			},
 		},
 		{
 			name: "User Not Found",
@@ -148,9 +153,19 @@ func TestLoginHandler(t *testing.T) {
 				"username": "nonexistent",
 				"password": "Test12!!@@"
 			}`,
-			expectedCode:  http.StatusUnauthorized,
-			expectedError: "Invalid username",
-			setupMockDB:   func(t *testing.T, userRepo *repository.UsersRepo) {},
+			expectedCode: http.StatusUnauthorized,
+			setupMockDB:  func(t *testing.T, userRepo *repository.UsersRepo) {},
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				if response.Error != "Invalid username" {
+					t.Errorf("Expected error 'Invalid username', got %q", response.Error)
+				}
+			},
 		},
 		{
 			name: "Invalid JSON",
@@ -158,54 +173,52 @@ func TestLoginHandler(t *testing.T) {
 				"username": "testuser",
 				"password":
 			}`,
-			expectedCode:  http.StatusBadRequest,
-			expectedError: "Invalid Request",
-			setupMockDB:   func(t *testing.T, userRepo *repository.UsersRepo) {},
+			expectedCode: http.StatusBadRequest,
+			setupMockDB:  func(t *testing.T, userRepo *repository.UsersRepo) {},
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				if response.Error != "Invalid Request" {
+					t.Errorf("Expected error 'Invalid Request', got %q", response.Error)
+				}
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := utils.MongoClient.Database("tonotes_test").Collection("users").Drop(context.Background()); err != nil {
+			// Clear collection before each test
+			if err := client.Database("tonotes_test").Collection("users").Drop(context.Background()); err != nil {
 				t.Fatalf("Failed to clear test database: %v", err)
 			}
 
+			// Setup mock database
 			userRepo := repository.GetUsersRepo(utils.MongoClient)
 			tt.setupMockDB(t, userRepo)
 
+			// Create request
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest("POST", "/login", bytes.NewBufferString(tt.inputJSON))
 			req.Header.Set("Content-Type", "application/json")
 
-			r.ServeHTTP(w, req)
+			// Serve request
+			router.ServeHTTP(w, req)
 
+			// Log response for debugging
 			t.Logf("Response Status: %d", w.Code)
 			t.Logf("Response Body: %s", w.Body.String())
 
+			// Check status code
 			if w.Code != tt.expectedCode {
 				t.Errorf("Expected status code %d, got %d", tt.expectedCode, w.Code)
 			}
 
-			var response map[string]interface{}
-			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-				t.Fatalf("Failed to parse response: %v", err)
-			}
-
-			if tt.expectedError != "" {
-				if errMsg, ok := response["error"].(string); !ok || errMsg != tt.expectedError {
-					t.Errorf("Expected error message %q, got %q", tt.expectedError, errMsg)
-				}
-			} else {
-				if _, hasToken := response["token"]; !hasToken {
-					t.Error("Response missing token")
-				}
-				if _, hasRefresh := response["refresh"]; !hasRefresh {
-					t.Error("Response missing refresh token")
-				}
-				if msg, ok := response["message"].(string); !ok || msg != "Login successful" {
-					t.Errorf("Expected message 'Login successful', got %q", msg)
-				}
-			}
+			// Run custom response checks
+			tt.checkResponse(t, w)
 		})
 	}
 }

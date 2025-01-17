@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"main/handler"
 	"main/services"
+	"main/utils"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,7 +30,6 @@ func createAuthHeader(t *testing.T, tokenType string) string {
 		if err != nil {
 			t.Fatalf("Failed to generate refresh token: %v", err)
 		}
-		// Log the token for debugging
 		t.Logf("Generated refresh token: %s", token)
 		return "Bearer " + token
 	case "access_token":
@@ -51,7 +51,6 @@ func createAuthHeader(t *testing.T, tokenType string) string {
 }
 
 func TestRefreshTokenHandler(t *testing.T) {
-	// Setup
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
 	r.POST("/refresh", handler.RefreshTokenHandler)
@@ -61,88 +60,117 @@ func TestRefreshTokenHandler(t *testing.T) {
 		tokenType     string
 		expectedCode  int
 		expectedError string
+		checkResponse func(*testing.T, *httptest.ResponseRecorder)
 	}{
 		{
 			name:         "Successful Refresh",
 			tokenType:    "valid_refresh",
 			expectedCode: http.StatusOK,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				data, ok := response.Data.(map[string]interface{})
+				if !ok {
+					t.Fatal("Response missing data object")
+				}
+
+				if _, hasAccessToken := data["access_token"]; !hasAccessToken {
+					t.Error("Response missing access_token")
+				}
+				if _, hasRefreshToken := data["new_refresh_token"]; !hasRefreshToken {
+					t.Error("Response missing new_refresh_token")
+				}
+			},
 		},
 		{
 			name:          "Missing Authorization Header",
 			tokenType:     "empty",
 			expectedCode:  http.StatusUnauthorized,
 			expectedError: "Missing or invalid refresh",
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				if response.Error != "Missing or invalid refresh" {
+					t.Errorf("Expected error 'Missing or invalid refresh', got %q", response.Error)
+				}
+			},
 		},
 		{
 			name:          "Invalid Token Format",
 			tokenType:     "invalid",
 			expectedCode:  http.StatusUnauthorized,
 			expectedError: "invalid refresh",
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				if response.Error != "invalid refresh" {
+					t.Errorf("Expected error 'invalid refresh', got %q", response.Error)
+				}
+			},
 		},
 		{
 			name:          "No Bearer Prefix",
 			tokenType:     "no_bearer",
 			expectedCode:  http.StatusUnauthorized,
 			expectedError: "Missing or invalid refresh",
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				if response.Error != "Missing or invalid refresh" {
+					t.Errorf("Expected error 'Missing or invalid refresh', got %q", response.Error)
+				}
+			},
 		},
 		{
 			name:          "Invalid Token Type",
 			tokenType:     "access_token",
 			expectedCode:  http.StatusUnauthorized,
 			expectedError: "invalid claims",
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				if response.Error != "invalid claims" {
+					t.Errorf("Expected error 'invalid claims', got %q", response.Error)
+				}
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create request
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest("POST", "/refresh", nil)
 
-			// Add authorization header using helper function
 			authHeader := createAuthHeader(t, tt.tokenType)
 			if authHeader != "" {
 				req.Header.Set("Authorization", authHeader)
 			}
 
-			// Serve request
 			r.ServeHTTP(w, req)
 
-			// Log response for debugging
 			t.Logf("Response Status: %d", w.Code)
 			t.Logf("Response Body: %s", w.Body.String())
 
-			// Check status code
 			if w.Code != tt.expectedCode {
 				t.Errorf("Expected status code %d, got %d", tt.expectedCode, w.Code)
 			}
 
-			// For successful case, check if new tokens are present
-			if tt.expectedCode == http.StatusOK {
-				var response map[string]interface{}
-				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-					t.Fatalf("Failed to parse response: %v", err)
-				}
-
-				if _, hasAccessToken := response["access_token"]; !hasAccessToken {
-					t.Error("Response missing access_token")
-				}
-				if _, hasRefreshToken := response["new_refresh_token"]; !hasRefreshToken {
-					t.Error("Response missing new_refresh_token")
-				}
-			}
-
-			// For error cases, check error message
-			if tt.expectedError != "" {
-				var response map[string]interface{}
-				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-					t.Fatalf("Failed to parse response: %v", err)
-				}
-
-				if errMsg, ok := response["error"].(string); !ok || errMsg != tt.expectedError {
-					t.Errorf("Expected error message %q, got %q", tt.expectedError, errMsg)
-				}
-			}
+			tt.checkResponse(t, w)
 		})
 	}
 }

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"main/services"
-	"net/http"
 	"strings"
 
 	"fmt"
@@ -16,7 +15,7 @@ func LogoutHandler(c *gin.Context) {
 	// Get the access token from Authorization header
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing or invalid access token"})
+		utils.Unauthorized(c, "Missing or invalid access token")
 		return
 	}
 
@@ -32,14 +31,14 @@ func LogoutHandler(c *gin.Context) {
 	})
 
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid access token"})
+		utils.Unauthorized(c, "Invalid access token")
 		return
 	}
 
 	// Get and validate the refresh token
 	refreshToken := c.GetHeader("Refresh-Token")
 	if refreshToken == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing refresh token"})
+		utils.BadRequest(c, "Missing refresh token")
 		return
 	}
 
@@ -52,17 +51,17 @@ func LogoutHandler(c *gin.Context) {
 	})
 
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid refresh token"})
+		utils.BadRequest(c, "Invalid refresh token")
 		return
 	}
 
 	// Both tokens are valid, now blacklist them
 	if err := services.BlacklistTokens(accessToken, refreshToken); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to logout"})
+		utils.InternalError(c, "Failed to logout")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	utils.Success(c, gin.H{
 		"message": "Successfully logged out",
 	})
 }

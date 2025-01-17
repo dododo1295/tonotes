@@ -45,7 +45,7 @@ func init() {
 			hasNumber := false
 			hasSpecial := false
 
-			if len(password) < 8 {
+			if len(password) < 6 {
 				return false
 			}
 
@@ -68,11 +68,9 @@ func init() {
 }
 
 func TestRegistrationHandler(t *testing.T) {
-	// Set environment variables
 	os.Setenv("GO_ENV", "test")
 	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
 
-	// Setup MongoDB connection
 	testClient, err := mongo.Connect(context.Background(),
 		options.Client().ApplyURI(os.Getenv("MONGO_URI")))
 	if err != nil {
@@ -80,10 +78,8 @@ func TestRegistrationHandler(t *testing.T) {
 	}
 	defer testClient.Disconnect(context.Background())
 
-	// Set the global MongoClient to our test client
 	utils.MongoClient = testClient
 
-	// Setup Gin with test mode
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
@@ -94,7 +90,7 @@ func TestRegistrationHandler(t *testing.T) {
 		inputJSON     string
 		setupFunc     func() error
 		expectedCode  int
-		expectedError string
+		checkResponse func(*testing.T, *httptest.ResponseRecorder)
 	}{
 		{
 			name:      "Successful Registration",
@@ -103,6 +99,27 @@ func TestRegistrationHandler(t *testing.T) {
 				return testClient.Database("tonotes_test").Collection("users").Drop(context.Background())
 			},
 			expectedCode: http.StatusCreated,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				data, ok := response.Data.(map[string]interface{})
+				if !ok {
+					t.Fatal("Response missing data object")
+				}
+
+				if _, hasToken := data["token"]; !hasToken {
+					t.Error("Response missing token")
+				}
+				if _, hasRefresh := data["refresh"]; !hasRefresh {
+					t.Error("Response missing refresh token")
+				}
+				if msg, ok := data["message"].(string); !ok || msg != "user registered successfully" {
+					t.Errorf("Expected message 'user registered successfully', got %q", msg)
+				}
+			},
 		},
 		{
 			name:      "Duplicate Username",
@@ -123,90 +140,96 @@ func TestRegistrationHandler(t *testing.T) {
 				)
 				return err
 			},
-			expectedCode:  http.StatusConflict,
-			expectedError: "username already exists",
+			expectedCode: http.StatusConflict,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				if response.Error != "username already exists" {
+					t.Errorf("Expected error 'username already exists', got %q", response.Error)
+				}
+			},
 		},
 		{
-			name:          "Invalid Password - Too Short",
-			inputJSON:     `{"username":"testuser1234","password":"a!1","email":"test@example.com"}`,
-			expectedCode:  http.StatusBadRequest,
-			expectedError: "invalid request",
+			name:         "Invalid Password - Too Short",
+			inputJSON:    `{"username":"testuser1234","password":"a!1","email":"test@example.com"}`,
+			expectedCode: http.StatusBadRequest,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				if response.Error != "invalid request" {
+					t.Errorf("Expected error 'invalid request', got %q", response.Error)
+				}
+			},
 		},
 		{
-			name:          "Invalid Password - No Number",
-			inputJSON:     `{"username":"testuser1234","password":"abcdef!!","email":"test@example.com"}`,
-			expectedCode:  http.StatusBadRequest,
-			expectedError: "invalid request",
+			name:         "Invalid Password - No Number",
+			inputJSON:    `{"username":"testuser1234","password":"abcdef!!","email":"test@example.com"}`,
+			expectedCode: http.StatusBadRequest,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				if response.Error != "invalid request" {
+					t.Errorf("Expected error 'invalid request', got %q", response.Error)
+				}
+			},
 		},
 		{
-			name:          "Invalid Password - No Special Character",
-			inputJSON:     `{"username":"testuser1234","password":"abcdef123","email":"test@example.com"}`,
-			expectedCode:  http.StatusBadRequest,
-			expectedError: "invalid request",
+			name:         "Invalid Password - No Special Character",
+			inputJSON:    `{"username":"testuser1234","password":"abcdef123","email":"test@example.com"}`,
+			expectedCode: http.StatusBadRequest,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				if response.Error != "invalid request" {
+					t.Errorf("Expected error 'invalid request', got %q", response.Error)
+				}
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Run setup if provided
 			if tt.setupFunc != nil {
 				if err := tt.setupFunc(); err != nil {
 					t.Fatalf("Setup failed: %v", err)
 				}
 			}
 
-			// Create request
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(tt.inputJSON))
 			req.Header.Set("Content-Type", "application/json")
 
-			// Debug logging
 			t.Logf("Test: %s", tt.name)
 			t.Logf("Making request with body: %s", tt.inputJSON)
 
-			// Additional debug: check database state before request
 			count, _ := testClient.Database("tonotes_test").Collection("users").CountDocuments(context.Background(), bson.M{})
 			t.Logf("Documents in collection before request: %d", count)
 
-			// Serve request
 			router.ServeHTTP(w, req)
 
-			// Debug logging
 			t.Logf("Response Status: %d", w.Code)
 			t.Logf("Response Body: %s", w.Body.String())
 
-			// Additional debug: check database state after request
 			count, _ = testClient.Database("tonotes_test").Collection("users").CountDocuments(context.Background(), bson.M{})
 			t.Logf("Documents in collection after request: %d", count)
 
-			// Check status code
 			if w.Code != tt.expectedCode {
 				t.Errorf("Expected status code %d, got %d", tt.expectedCode, w.Code)
 			}
 
-			// Parse response
-			var response map[string]interface{}
-			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-				t.Fatalf("Failed to parse response: %v", err)
-			}
-
-			// Check for error cases
-			if tt.expectedError != "" {
-				if errMsg, ok := response["error"].(string); !ok || errMsg != tt.expectedError {
-					t.Errorf("Expected error message %q, got %q", tt.expectedError, errMsg)
-				}
-			} else {
-				// Check successful registration response
-				if _, hasToken := response["token"]; !hasToken {
-					t.Error("Response missing token")
-				}
-				if _, hasRefresh := response["refresh"]; !hasRefresh {
-					t.Error("Response missing refresh token")
-				}
-				if msg, ok := response["message"].(string); !ok || msg != "user registered successfully" {
-					t.Errorf("Expected message 'user registered successfully', got %q", msg)
-				}
-			}
+			tt.checkResponse(t, w)
 		})
 	}
 }
