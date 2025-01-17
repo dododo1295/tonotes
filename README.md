@@ -34,38 +34,13 @@ This project is licensed under an **All Rights Reserved** license. Unauthorized 
 
 ---
 
-## Todo
-### Up next
+## Features Implemented
 
-[] learn more Go...
-
-[] (Account Creation) figure out how to add and remove from my database via the server or react...
-
-
-### General Todos (constantly changing as I learn more)
-
-[] create a Go server that can be in the middle for MongoDB and React and test that this works without encryption
-
-[] look into HashiCorp Vault or AWS Secrets Manager
-
-[] create seperate requirements for logins and encryption keys but it's paramount that only the login can access their own todos/notes.
-
-[] create HTML template for front-end
-
-[] figure out the typescript
-
-[] structure the components.
-
-[] figure out UX.
-
-[] how to encrypt database? - encrypt before put in and decrypt on the way out, maybe?
-
-[] finalize name
-
-[] figure out how to store notes and how they should be formatted (can I use md files? how would I encrypt/store them)
-
-### Completed
-
-[x] create MongoDB database.
-
-[x] import the necessary libraries for tailwind
+### Backend
+User Registration
+User Login
+User Logout
+User Authentication
+User Authorization
+User Password Change
+User Email Change
