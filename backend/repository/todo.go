@@ -11,24 +11,19 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-type TodoRepo struct {
+type TodosRepo struct {
 	MongoCollection *mongo.Collection
 }
 
 // Constructor function for TodosRepo
-func GetTodosRepo(client *mongo.Client) *TodoRepo {
-	return &TodoRepo{
-		MongoCollection: client.Database(os.Getenv("MONGO_DB")).Collection("todos"),
-	}
-}
-func GetTodoRepo(client *mongo.Client) *TodoRepo {
-	return &TodoRepo{
+func GetTodosRepo(client *mongo.Client) *TodosRepo {
+	return &TodosRepo{
 		MongoCollection: client.Database(os.Getenv("MONGO_DB")).Collection("todos"),
 	}
 }
 
 // CreateTodo adds a new todo
-func (r *TodoRepo) CreateTodo(todo *model.Todos) error {
+func (r *TodosRepo) CreateTodo(todo *model.Todos) error {
 	if todo.UserID == "" {
 		return errors.New("user ID is required")
 	}
@@ -38,7 +33,7 @@ func (r *TodoRepo) CreateTodo(todo *model.Todos) error {
 }
 
 // GetUserTodos retrieves all todos for a user
-func (r *TodoRepo) GetUserTodos(userID string) ([]*model.Todos, error) {
+func (r *TodosRepo) GetUserTodos(userID string) ([]*model.Todos, error) {
 	var todos []*model.Todos
 	cursor, err := r.MongoCollection.Find(context.Background(),
 		bson.M{"user_id": userID})
@@ -54,7 +49,7 @@ func (r *TodoRepo) GetUserTodos(userID string) ([]*model.Todos, error) {
 }
 
 // UpdateTodo updates a specific todo
-func (r *TodoRepo) UpdateTodo(todoID string, userID string, updates *model.Todos) error {
+func (r *TodosRepo) UpdateTodo(todoID string, userID string, updates *model.Todos) error {
 	filter := bson.M{
 		"_id":     todoID,
 		"user_id": userID, // Ensure user owns this todo
@@ -82,7 +77,7 @@ func (r *TodoRepo) UpdateTodo(todoID string, userID string, updates *model.Todos
 }
 
 // DeleteTodo removes a specific todo
-func (r *TodoRepo) DeleteTodo(todoID string, userID string) error {
+func (r *TodosRepo) DeleteTodo(todoID string, userID string) error {
 	filter := bson.M{
 		"_id":     todoID,
 		"user_id": userID, // Ensure user owns this todo
@@ -101,7 +96,7 @@ func (r *TodoRepo) DeleteTodo(todoID string, userID string) error {
 }
 
 // ToggleTodoComplete toggles the complete status of a todo
-func (r *TodoRepo) ToggleTodoComplete(todoID string, userID string) error {
+func (r *TodosRepo) ToggleTodoComplete(todoID string, userID string) error {
 	filter := bson.M{
 		"_id":     todoID,
 		"user_id": userID,
@@ -135,7 +130,7 @@ func (r *TodoRepo) ToggleTodoComplete(todoID string, userID string) error {
 }
 
 // CountUserTodos counts the number of todos for a user
-func (r *TodoRepo) CountUserTodos(userID string) (int, error) {
+func (r *TodosRepo) CountUserTodos(userID string) (int, error) {
 	count, err := r.MongoCollection.CountDocuments(context.Background(),
 		bson.M{"user_id": userID})
 	if err != nil {
@@ -145,7 +140,7 @@ func (r *TodoRepo) CountUserTodos(userID string) (int, error) {
 }
 
 // GetCompletedTodos gets all completed todos for a user
-func (r *TodoRepo) GetCompletedTodos(userID string) ([]*model.Todos, error) {
+func (r *TodosRepo) GetCompletedTodos(userID string) ([]*model.Todos, error) {
 	filter := bson.M{
 		"user_id":  userID,
 		"complete": true,
@@ -165,7 +160,7 @@ func (r *TodoRepo) GetCompletedTodos(userID string) ([]*model.Todos, error) {
 }
 
 // GetPendingTodos gets all pending todos for a user
-func (r *TodoRepo) GetPendingTodos(userID string) ([]*model.Todos, error) {
+func (r *TodosRepo) GetPendingTodos(userID string) ([]*model.Todos, error) {
 	filter := bson.M{
 		"user_id":  userID,
 		"complete": false,
