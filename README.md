@@ -27,20 +27,81 @@ ___
 
 
 
+## Backend Features Implemented
+
+### Authentication & Authorization
+- ✅ User Registration with validation
+- ✅ Login with JWT token generation
+- ✅ Refresh token mechanism
+- ✅ Token blacklisting
+- ✅ Session management
+- ✅ Logout (single session)
+- ✅ Logout all sessions
+
+### User Management
+- ✅ Get user profile
+- ✅ Change email (with rate limiting)
+- ✅ Change password (with rate limiting)
+- ✅ Delete account
+- ✅ Password validation and hashing (Argon2)
+
+### Session Management
+- ✅ Session tracking
+- ✅ Multiple device sessions
+- ✅ Session expiration
+- ✅ Active session listing
+- ✅ Session termination
+
+### Statistics
+- ✅ User statistics
+  - Notes count (total, archived, pinned)
+  - Todo count (total, completed, pending)
+  - Activity tracking
+  - Tag statistics
+  - Session count
+
+### Notes (Repository Ready)
+- ✅ CRUD operations
+- ✅ Archiving functionality
+- ✅ Pin/Unpin notes
+- ✅ Tag system
+- ✅ Search functionality
+- ✅ Tag-based filtering
+
+### Todos (Repository Ready)
+- ✅ CRUD operations
+- ✅ Complete/Incomplete toggle
+- ✅ Status filtering (completed/pending)
+
+### Security Features
+- ✅ JWT Authentication
+- ✅ Password hashing with Argon2
+- ✅ Rate limiting for sensitive operations
+- ✅ Input validation
+- ✅ CORS protection
+
+### Testing
+- ✅ Authentication tests
+- ✅ User management tests
+- ✅ Session management tests
+- ✅ Statistics tests
+- ✅ Database connection tests
+
+### Infrastructure
+- ✅ MongoDB integration
+- ✅ Environment configuration
+- ✅ Error handling
+- ✅ Response standardization
+- ✅ Middleware implementation
+
+### Currently Implementing
+1. Notes Handler Implementation
+2. Todos Handler Implementation
+
+
 ---
 
 ## License
 This project is licensed under an **All Rights Reserved** license. Unauthorized copying, distribution, or use of this material is strictly prohibited.
 
 ---
-
-## Features Implemented
-
-### Backend
-User Registration
-User Login
-User Logout
-User Authentication
-User Authorization
-User Password Change
-User Email Change
