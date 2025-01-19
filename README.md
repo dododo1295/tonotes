@@ -29,6 +29,17 @@ ___
 
 ## Backend Features Implemented
 
+---
+
+### Currently In Development
+- ❎ Todos Use Case
+- ❎ Notes Encryption and Decryption (Considering)
+- ❎ Todos Repository (Tags, Sorting, Filtering)
+- ❎ Todos Handlers
+- ❎ Notes Handlers
+
+--
+
 ### Authentication & Authorization
 - ✅ User Registration with validation
 - ✅ Login with JWT token generation
@@ -94,9 +105,11 @@ ___
 - ✅ Response standardization
 - ✅ Middleware implementation
 
-### Currently Implementing
-1. Notes Handler Implementation
-2. Todos Handler Implementation
+### Notes and Todos
+- ✅ Notes and Todos Indexing
+- ✅ Notes and Todos Models (WIP)
+- ✅ Notes Repository
+- ✅ Notes Use Case
 
 
 ---
