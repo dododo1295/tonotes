@@ -26,5 +26,4 @@ dist-ssr
 #extras
 .zed
 .env
-
-
+EncryptedNotes.md
