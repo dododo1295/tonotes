@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"main/model"
 	"os"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -454,6 +456,17 @@ func (r *NotesRepo) TogglePin(noteID string, userID string) error {
 
 // UpdatePinPosition updates the position of a pinned note
 func (r *NotesRepo) UpdatePinPosition(noteID string, userID string, newPosition int) error {
+	// Get total pinned notes first to validate position
+	pinnedNotes, err := r.GetPinnedNotes(userID)
+	if err != nil {
+		return err
+	}
+
+	// Validate new position
+	if newPosition < 1 || newPosition > len(pinnedNotes) {
+		return fmt.Errorf("invalid position")
+	}
+
 	session, err := r.MongoCollection.Database().Client().StartSession()
 	if err != nil {
 		return err
@@ -543,95 +556,51 @@ func (r *NotesRepo) GetPinnedNotes(userID string) ([]*model.Notes, error) {
 	return notes, nil
 }
 
-func (r *NotesRepo) GetSearchSuggestions(userID string, prefix string) ([]string, error) {
-	pipeline := []bson.M{
-		{
-			"$match": bson.M{
-				"user_id":     userID,
-				"is_archived": false,
-			},
-		},
-		{
-			"$project": bson.M{
-				"title_words": bson.M{
-					"$split": []interface{}{"$title", " "},
-				},
-				"tags": 1,
-			},
-		},
-		{
-			"$facet": bson.M{
-				"from_titles": []bson.M{
-					{
-						"$unwind": "$title_words",
-					},
-					{
-						"$match": bson.M{
-							"title_words": bson.M{
-								"$regex":   "^" + regexp.QuoteMeta(prefix),
-								"$options": "i",
-							},
-						},
-					},
-					{
-						"$group": bson.M{
-							"_id": "$title_words",
-						},
-					},
-				},
-				"from_tags": []bson.M{
-					{
-						"$unwind": "$tags",
-					},
-					{
-						"$match": bson.M{
-							"tags": bson.M{
-								"$regex":   "^" + regexp.QuoteMeta(prefix),
-								"$options": "i",
-							},
-						},
-					},
-					{
-						"$group": bson.M{
-							"_id": "$tags",
-						},
-					},
-				},
-			},
-		},
-		{
-			"$project": bson.M{
-				"suggestions": bson.M{
-					"$concatArrays": []interface{}{
-						"$from_titles._id",
-						"$from_tags._id",
-					},
-				},
-			},
-		},
-		{
-			"$unwind": "$suggestions",
-		},
-		{
-			"$group": bson.M{
-				"_id": nil,
-				"suggestions": bson.M{
-					"$addToSet": "$suggestions",
-				},
-			},
-		},
-		{
-			"$project": bson.M{
-				"_id": 0,
-				"suggestions": bson.M{
-					"$slice": []interface{}{"$suggestions", 0, 2},
-				},
-			},
-		},
+func (r *NotesRepo) GetSearchSuggestions(userID, prefix string) ([]string, error) {
+	if strings.TrimSpace(prefix) == "" {
+		return []string{}, nil
 	}
 
-	var result struct {
-		Suggestions []string `bson:"suggestions"`
+	prefix = strings.ToLower(strings.TrimSpace(prefix))
+
+	pipeline := []bson.M{
+		{
+			"$match": bson.M{"user_id": userID},
+		},
+		{
+			"$project": bson.M{
+				"words": bson.M{
+					"$concatArrays": []interface{}{
+						bson.M{"$split": []interface{}{"$title", " "}},
+						"$tags",
+					},
+				},
+			},
+		},
+		{
+			"$unwind": "$words",
+		},
+		{
+			"$project": bson.M{
+				"word": bson.M{"$toLower": "$words"},
+			},
+		},
+		{
+			"$match": bson.M{
+				"word": bson.M{
+					"$regex": primitive.Regex{
+						Pattern: "^" + regexp.QuoteMeta(prefix),
+						Options: "i",
+					},
+				},
+			},
+		},
+		{
+			"$group": bson.M{"_id": "$word"},
+		},
+		{
+			"$sort": bson.M{"_id": 1},
+		},
 	}
 
 	cursor, err := r.MongoCollection.Aggregate(context.Background(), pipeline)
@@ -640,14 +609,21 @@ func (r *NotesRepo) GetSearchSuggestions(userID string, prefix string) ([]string
 	}
 	defer cursor.Close(context.Background())
 
-	if cursor.Next(context.Background()) {
-		if err := cursor.Decode(&result); err != nil {
-			return nil, err
-		}
-		return result.Suggestions, nil
+	var results []struct {
+		ID string `bson:"_id"`
+	}
+	if err = cursor.All(context.Background(), &results); err != nil {
+		return nil, err
 	}
 
-	return []string{}, nil
+	suggestions := make([]string, 0, len(results))
+	for _, result := range results {
+		if word := strings.TrimSpace(result.ID); word != "" {
+			suggestions = append(suggestions, word)
+		}
+	}
+
+	return suggestions, nil
 }
 
 // helper functions
