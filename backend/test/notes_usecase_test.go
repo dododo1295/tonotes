@@ -310,6 +310,7 @@ func TestCreateNote(t *testing.T) {
 		name    string
 		note    *model.Notes
 		wantErr bool
+		errMsg  string
 	}{
 		{
 			name: "Valid Note",
@@ -330,6 +331,27 @@ func TestCreateNote(t *testing.T) {
 				Content: "Content without title",
 			},
 			wantErr: true,
+			errMsg:  "note title is required",
+		},
+		{
+			name: "Empty Content",
+			note: &model.Notes{
+				ID:      uuid.New().String(),
+				UserID:  userID,
+				Title:   "Title without content",
+				Content: "",
+			},
+			wantErr: true,
+			errMsg:  "note content is required",
+		},
+		{
+			name: "Missing Both Title and Content",
+			note: &model.Notes{
+				ID:     uuid.New().String(),
+				UserID: userID,
+			},
+			wantErr: true,
+			errMsg:  "note title is required",
 		},
 		{
 			name: "Title Too Long",
@@ -340,6 +362,18 @@ func TestCreateNote(t *testing.T) {
 				Content: "Content",
 			},
 			wantErr: true,
+			errMsg:  "note title exceeds maximum length",
+		},
+		{
+			name: "Content Too Long",
+			note: &model.Notes{
+				ID:      uuid.New().String(),
+				UserID:  userID,
+				Title:   "Test Note",
+				Content: strings.Repeat("a", 50001), // 50001 characters
+			},
+			wantErr: true,
+			errMsg:  "note content exceeds maximum length",
 		},
 		{
 			name: "Too Many Tags",
@@ -347,10 +381,22 @@ func TestCreateNote(t *testing.T) {
 				ID:      uuid.New().String(),
 				UserID:  userID,
 				Title:   "Test Note",
-				Content: "Content",
+				Content: "Valid content",
 				Tags:    []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"},
 			},
 			wantErr: true,
+			errMsg:  "maximum 10 tags allowed",
+		},
+		{
+			name: "Minimum Content Length",
+			note: &model.Notes{
+				ID:      uuid.New().String(),
+				UserID:  userID,
+				Title:   "Test Note",
+				Content: " ", // Just whitespace
+			},
+			wantErr: true,
+			errMsg:  "note content cannot be empty",
 		},
 	}
 
@@ -359,23 +405,32 @@ func TestCreateNote(t *testing.T) {
 			err := svc.CreateNote(ctx, tt.note)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateNote() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && err != nil && err.Error() != tt.errMsg {
+				t.Errorf("CreateNote() error message = %v, want %v", err.Error(), tt.errMsg)
 			}
 		})
 	}
 
 	// Test note limit
-	for i := 0; i < 101; i++ {
-		note := &model.Notes{
-			ID:      uuid.New().String(),
-			UserID:  userID,
-			Title:   fmt.Sprintf("Note %d", i),
-			Content: "Content",
+	t.Run("Note Limit Test", func(t *testing.T) {
+		for i := 0; i < 101; i++ {
+			note := &model.Notes{
+				ID:      uuid.New().String(),
+				UserID:  userID,
+				Title:   fmt.Sprintf("Note %d", i),
+				Content: "Valid content for limit test",
+			}
+			err := svc.CreateNote(ctx, note)
+			if i == 100 && err == nil {
+				t.Error("CreateNote() should fail after 100 notes")
+			}
+			if i == 100 && err != nil && err.Error() != "user has reached maximum note limit" {
+				t.Errorf("Expected 'user has reached maximum note limit' error, got %v", err)
+			}
 		}
-		err := svc.CreateNote(ctx, note)
-		if i == 100 && err == nil {
-			t.Error("CreateNote() should fail after 100 notes")
-		}
-	}
+	})
 }
 
 func TestUpdateNoteUsecase(t *testing.T) {
@@ -739,7 +794,6 @@ func TestSearchSuggestions(t *testing.T) {
 	_, svc, cleanup := setupNotesUsecaseTest(t)
 	defer cleanup()
 
-	ctx := context.Background()
 	userID := uuid.New().String()
 
 	// Create notes with various titles and tags
@@ -763,7 +817,7 @@ func TestSearchSuggestions(t *testing.T) {
 	// Log the notes being created
 	for _, note := range notes {
 		t.Logf("Creating note - Title: %s, Tags: %v", note.Title, note.Tags)
-		if err := svc.CreateNote(ctx, note); err != nil {
+		if err := svc.CreateNote(context.Background(), note); err != nil {
 			t.Fatalf("Failed to create test note: %v", err)
 		}
 	}
@@ -799,7 +853,7 @@ func TestSearchSuggestions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			suggestions, err := svc.GetSearchSuggestions(ctx, userID, tt.prefix)
+			suggestions, err := svc.GetSearchSuggestions(userID, tt.prefix)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetSearchSuggestions() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -951,6 +1005,176 @@ func TestAdvancedSearch(t *testing.T) {
 						}
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestGetSearchSuggestionsEdgeCases(t *testing.T) {
+	_, svc, cleanup := setupNotesUsecaseTest(t)
+	defer cleanup()
+
+	userID := uuid.New().String()
+
+	// Create test notes with various edge cases in titles and tags
+	notes := []*model.Notes{
+		{
+			ID:      uuid.New().String(),
+			UserID:  userID,
+			Title:   "Test Note with Special Ch@r@cters!",
+			Content: "Content 1",
+			Tags:    []string{"test!@#", "special-tag"},
+		},
+		{
+			ID:      uuid.New().String(),
+			UserID:  userID,
+			Title:   "测试 Unicode Title",
+			Content: "Content 2",
+			Tags:    []string{"测试", "unicode-test"},
+		},
+		{
+			ID:      uuid.New().String(),
+			UserID:  userID,
+			Title:   strings.Repeat("a", 200),
+			Content: "Content 3",
+			Tags:    []string{strings.Repeat("b", 100)},
+		},
+		{
+			ID:      uuid.New().String(),
+			UserID:  userID,
+			Title:   "  Multiple   Spaces   Test  ",
+			Content: "Content 4",
+			Tags:    []string{"  spaced  tag  "},
+		},
+	}
+
+	// Insert test notes
+	for _, note := range notes {
+		err := svc.CreateNote(context.Background(), note)
+		if err != nil {
+			t.Fatalf("Failed to create test note: %v", err)
+		}
+	}
+
+	tests := []struct {
+		name          string
+		userID        string
+		prefix        string
+		expectedCount int
+		expectedError string
+		checkResults  func(t *testing.T, suggestions []string)
+	}{
+		{
+			name:          "Special Characters in Prefix",
+			userID:        userID,
+			prefix:        "test!@#",
+			expectedCount: 1,
+			checkResults: func(t *testing.T, suggestions []string) {
+				for _, s := range suggestions {
+					if !strings.HasPrefix(strings.ToLower(s), "test") {
+						t.Errorf("Invalid suggestion for special characters: %s", s)
+					}
+				}
+			},
+		},
+		{
+			name:          "Unicode Characters",
+			userID:        userID,
+			prefix:        "测试",
+			expectedCount: 1,
+			checkResults: func(t *testing.T, suggestions []string) {
+				found := false
+				for _, s := range suggestions {
+					if strings.Contains(s, "测试") {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Error("Unicode suggestion not found")
+				}
+			},
+		},
+		{
+			name:          "Very Long Prefix",
+			userID:        userID,
+			prefix:        strings.Repeat("a", 100),
+			expectedCount: 1,
+			checkResults: func(t *testing.T, suggestions []string) {
+				for _, s := range suggestions {
+					if len(s) > 200 {
+						t.Errorf("Suggestion too long: %s", s)
+					}
+				}
+			},
+		},
+		{
+			name:          "Multiple Spaces in Prefix",
+			userID:        userID,
+			prefix:        "multiple", // Changed from "  Multiple   Spaces  "
+			expectedCount: 1,
+			checkResults: func(t *testing.T, suggestions []string) {
+				normalized := "multiple" // Changed from "multiple spaces"
+				found := false
+				for _, s := range suggestions {
+					if strings.ToLower(s) == normalized {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected to find normalized suggestion '%s'", normalized)
+				}
+			},
+		},
+		{
+			name:          "Empty Prefix",
+			userID:        userID,
+			prefix:        "",
+			expectedCount: 0,
+			expectedError: "search prefix is required",
+		},
+		{
+			name:          "Only Spaces Prefix",
+			userID:        userID,
+			prefix:        "   ",
+			expectedCount: 0,
+			expectedError: "search prefix is required",
+		},
+		{
+			name:          "Empty UserID",
+			userID:        "",
+			prefix:        "test",
+			expectedCount: 0,
+			expectedError: "user ID is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			suggestions, err := svc.GetSearchSuggestions(tt.userID, tt.prefix)
+
+			// Check error cases
+			if tt.expectedError != "" {
+				if err == nil || err.Error() != tt.expectedError {
+					t.Errorf("Expected error '%s', got '%v'", tt.expectedError, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			// Check suggestion count
+			if len(suggestions) != tt.expectedCount {
+				t.Errorf("Got %d suggestions, want %d", len(suggestions), tt.expectedCount)
+			}
+
+			// Run custom checks if provided
+			if tt.checkResults != nil {
+				tt.checkResults(t, suggestions)
 			}
 		})
 	}
