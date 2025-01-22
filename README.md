@@ -33,13 +33,17 @@ ___
 
 ### Currently In Development
 - ❎ Todos Use Case
-- ❎ Notes Encryption and Decryption (Considering)
 - ❎ Todos Repository (Tags, Sorting, Filtering)
 - ❎ Todos Handlers
 - ❎ Notes Handlers
+
+
+---
+### Wishlist
+- ❎ Notes Encryption and Decryption
 - ❎ Export features...
 
---
+---
 
 ### Authentication & Authorization
 - ✅ User Registration with validation
