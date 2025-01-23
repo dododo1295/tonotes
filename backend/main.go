@@ -8,6 +8,7 @@ import (
 	"main/handler"
 	"main/middleware"
 	"main/repository"
+	"main/usecase"
 	"main/utils"
 
 	"github.com/gin-gonic/gin"
@@ -29,8 +30,8 @@ func init() {
 		"JWT_SECRET_KEY",
 		"JWT_EXPIRATION_TIME",
 		"REFRESH_TOKEN_EXPIRATION_TIME",
-		"SESSION_COLLECTION",  // Added for sessions
-		"SESSION_DURATION",    // Added for sessions
+		"SESSION_COLLECTION", // Added for sessions
+		"SESSION_DURATION",   // Added for sessions
 		"PORT",
 	}
 
@@ -63,6 +64,12 @@ func setupRouter() *gin.Engine {
 
 	// Initialize session repository
 	sessionRepo := repository.GetSessionRepo(utils.MongoClient)
+	notesRepo := repository.GetNotesRepo(utils.MongoClient)
+
+	// Initialize services
+	notesService := &usecase.NotesService{
+		NotesRepo: notesRepo,
+	}
 
 	// Add CORS middleware
 	router.Use(middleware.CORSMiddleware())
@@ -114,10 +121,55 @@ func setupRouter() *gin.Engine {
 		// Notes endpoints (to be implemented)
 		notes := protected.Group("/notes")
 		{
-			notes.GET("/", nil)       // List notes
-			notes.POST("/", nil)      // Create note
-			notes.PUT("/:id", nil)    // Update note
-			notes.DELETE("/:id", nil) // Delete note
+			// Search and list operations
+			notes.GET("/", func(c *gin.Context) {
+				handler.GetUserNotesHandler(c, notesService)
+			})
+			notes.GET("/search", func(c *gin.Context) {
+				handler.SearchNotesHandler(c, notesService)
+			})
+			notes.GET("/archived", func(c *gin.Context) {
+				handler.GetArchivedNotesHandler(c, notesService)
+			})
+			notes.GET("/pinned", func(c *gin.Context) {
+				handler.GetPinnedNotesHandler(c, notesService)
+			})
+
+			// Tag-related operations
+			notes.GET("/tags", func(c *gin.Context) {
+				handler.GetUserTagsHandler(c, notesService)
+			})
+			notes.GET("/tags/all", func(c *gin.Context) {
+				handler.GetAllUserTagsHandler(c, notesService)
+			})
+			notes.GET("/suggestions", func(c *gin.Context) {
+				handler.GetSearchSuggestionsHandler(c, notesService)
+			})
+
+			// Basic CRUD operations
+			notes.POST("/", func(c *gin.Context) {
+				handler.CreateNoteHandler(c, notesService)
+			})
+			notes.PUT("/:id", func(c *gin.Context) {
+				handler.UpdateNoteHandler(c, notesService)
+			})
+			notes.DELETE("/:id", func(c *gin.Context) {
+				handler.DeleteNoteHandler(c, notesService)
+			})
+
+			// Note actions
+			notes.POST("/:id/favorite", func(c *gin.Context) {
+				handler.ToggleFavoriteHandler(c, notesService)
+			})
+			notes.POST("/:id/pin", func(c *gin.Context) {
+				handler.TogglePinHandler(c, notesService)
+			})
+			notes.POST("/:id/archive", func(c *gin.Context) {
+				handler.ArchiveNoteHandler(c, notesService)
+			})
+			notes.PUT("/:id/position", func(c *gin.Context) {
+				handler.UpdatePinPositionHandler(c, notesService)
+			})
 		}
 
 		// Todos endpoints (to be implemented)
