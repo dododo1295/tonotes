@@ -18,6 +18,10 @@ func TestAuthMiddleware(t *testing.T) {
 	os.Setenv("JWT_SECRET_KEY", "test_secret_key")
 	utils.InitJWT()
 
+	// set up redis
+	setupTestRedis(t)
+	defer services.TokenBlacklist.Close()
+
 	tests := []struct {
 		name           string
 		setupAuth      func() string
