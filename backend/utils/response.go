@@ -81,3 +81,11 @@ func Conflict(c *gin.Context, message string) {
 		Error:  message,
 	})
 }
+
+// Forbidden response
+func Forbidden(c *gin.Context, message string) {
+	c.JSON(http.StatusForbidden, &Response{
+		Status: http.StatusForbidden,
+		Error:  message,
+	})
+}
