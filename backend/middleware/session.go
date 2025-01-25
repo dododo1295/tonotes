@@ -1,8 +1,10 @@
 package middleware
 
 import (
+	"fmt"
 	"main/model"
 	"main/repository"
+	"main/utils"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -42,30 +44,38 @@ func SessionMiddleware(sessionRepo *repository.SessionRepo) gin.HandlerFunc {
 	}
 }
 func CreateSession(c *gin.Context, userID string, sessionRepo *repository.SessionRepo) error {
-	session := &model.Session{
-		SessionID:      uuid.New().String(),
-		UserID:         userID,
-		CreatedAt:      time.Now(),
-		ExpiresAt:      time.Now().Add(24 * time.Hour),
-		LastActivityAt: time.Now(),
-		DeviceInfo:     c.Request.UserAgent(),
-		IPAddress:      c.ClientIP(),
-		IsActive:       true,
-	}
+    // Generate session name from user agent
+    userAgent := c.Request.UserAgent()
+    browser, os, device := utils.ParseUserAgent(userAgent)
 
-	if err := sessionRepo.CreateSession(session); err != nil {
-		return err
-	}
+    // Create display name
+    displayName := utils.GenerateSessionName(userAgent, "")  // Empty string for location for now
 
-	c.SetCookie(
-		"session_id",
-		session.SessionID,
-		int(24*time.Hour.Seconds()),
-		"/",
-		"",
-		true,
-		true,
-	)
+    session := &model.Session{
+        SessionID:      uuid.New().String(),
+        UserID:         userID,
+        DisplayName:    displayName,
+        DeviceInfo:     fmt.Sprintf("%s on %s (%s)", browser, os, device),
+        CreatedAt:      time.Now(),
+        ExpiresAt:      time.Now().Add(24 * time.Hour),
+        LastActivityAt: time.Now(),
+        IPAddress:      c.ClientIP(),
+        IsActive:       true,
+    }
 
-	return nil
+    if err := sessionRepo.CreateSession(session); err != nil {
+        return err
+    }
+
+    c.SetCookie(
+        "session_id",
+        session.SessionID,
+        int(24*time.Hour.Seconds()),
+        "/",
+        "",
+        true,
+        true,
+    )
+
+    return nil
 }
