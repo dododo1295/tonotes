@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"fmt"
+	"log"
 	"main/middleware"
 	"main/model"
 	"main/repository"
@@ -12,6 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const MaxActiveSessions = 5
+
 func LoginHandler(c *gin.Context, sessionRepo *repository.SessionRepo) {
 	var loginReq model.LoginRequest
 
@@ -20,8 +22,6 @@ func LoginHandler(c *gin.Context, sessionRepo *repository.SessionRepo) {
 		return
 	}
 
-	fmt.Printf("Looking for user with username: %s\n", loginReq.Username)
-
 	userRepo := repository.GetUsersRepo(utils.MongoClient)
 	userService := &usecase.UserService{
 		UsersRepo: userRepo,
@@ -29,7 +29,6 @@ func LoginHandler(c *gin.Context, sessionRepo *repository.SessionRepo) {
 
 	user, err := userService.FindUserByUsername(loginReq.Username)
 	if err != nil {
-		fmt.Printf("Error finding user: %v\n", err)
 		utils.Unauthorized(c, "Invalid username")
 		return
 	}
@@ -39,21 +38,36 @@ func LoginHandler(c *gin.Context, sessionRepo *repository.SessionRepo) {
 		return
 	}
 
-	fmt.Printf("Found user password: %s\n", user.Password)
-	fmt.Printf("Provided password: %s\n", loginReq.Password)
-
+	// Verify password
 	checkPassword, err := services.VerifyPassword(user.Password, loginReq.Password)
 	if err != nil {
-		fmt.Printf("Password verification error: %v\n", err)
 		utils.Unauthorized(c, "Incorrect Password")
 		return
 	}
 	if !checkPassword {
-		fmt.Printf("Password verification failed\n")
 		utils.Unauthorized(c, "Incorrect Password")
 		return
 	}
 
+	// Check active session count
+	activeCount, err := sessionRepo.CountActiveSessions(user.UserID)
+	if err != nil {
+		utils.InternalError(c, "Failed to check session count")
+		return
+	}
+
+	var notice string
+	if activeCount >= MaxActiveSessions {
+		// End the least active session instead of rejecting the login
+		if err := sessionRepo.EndLeastActiveSession(user.UserID); err != nil {
+			utils.InternalError(c, "Failed to manage sessions")
+			return
+		}
+		notice = "Logged out of least active session due to session limit"
+		log.Printf("Ended least active session for user %s due to session limit", user.UserID)
+	}
+
+	// Generate tokens
 	token, err := services.GenerateToken(user.UserID)
 	if err != nil {
 		utils.InternalError(c, "Failed to generate token")
@@ -72,9 +86,18 @@ func LoginHandler(c *gin.Context, sessionRepo *repository.SessionRepo) {
 		return
 	}
 
-	utils.Success(c, gin.H{
+	// Prepare response
+	response := gin.H{
 		"message": "Login successful",
 		"token":   token,
 		"refresh": refreshToken,
-	})
+	}
+
+	// Add notice if a session was ended
+	if notice != "" {
+		response["notice"] = notice
+	}
+
+	// Return success response
+	utils.Success(c, response)
 }

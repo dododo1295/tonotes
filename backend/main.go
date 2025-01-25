@@ -8,6 +8,7 @@ import (
 	"main/handler"
 	"main/middleware"
 	"main/repository"
+	"main/services"
 	"main/usecase"
 	"main/utils"
 
@@ -51,6 +52,18 @@ func init() {
 			log.Fatalf("Required environment variable %s is not set", envVar)
 		}
 	}
+
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		log.Fatal("REDIS_URL environment variable is not set")
+	}
+
+	blacklist, err := services.NewTokenBlacklist(redisURL)
+	if err != nil {
+		log.Fatalf("Failed to initialize token blacklist: %v", err)
+	}
+	services.TokenBlacklist = blacklist
+
 	utils.InitValidator()
 	// Initialize JWT
 	utils.InitJWT()

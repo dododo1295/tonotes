@@ -2,12 +2,14 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"main/model"
 	"os"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type SessionRepo struct {
@@ -108,4 +110,51 @@ func (sr *SessionRepo) GetSessionByID(sessionID string) (*model.Session, error) 
 	}
 
 	return &session, nil
+}
+
+func (r *SessionRepo) CountActiveSessions(userID string) (int, error) {
+	count, err := r.MongoCollection.CountDocuments(
+		context.Background(),
+		bson.M{
+			"user_id":    userID,
+			"is_active":  true,
+			"expires_at": bson.M{"$gt": time.Now()},
+		},
+	)
+	return int(count), err
+}
+
+// on session creation, if the user has more than the maximum number of active sessions, end the least active session
+func (r *SessionRepo) EndLeastActiveSession(userID string) error {
+	ctx := context.Background()
+
+	// Find the least recently active session
+	var leastActiveSession model.Session
+	err := r.MongoCollection.FindOne(
+		ctx,
+		bson.M{
+			"user_id":    userID,
+			"is_active":  true,
+			"expires_at": bson.M{"$gt": time.Now()},
+		},
+		options.FindOne().
+			SetSort(bson.D{{Key: "last_activity_at", Value: 1}}),
+	).Decode(&leastActiveSession)
+
+	if err != nil {
+		return fmt.Errorf("failed to find least active session: %w", err)
+	}
+
+	// End the session
+	_, err = r.MongoCollection.UpdateOne(
+		ctx,
+		bson.M{"session_id": leastActiveSession.SessionID},
+		bson.M{
+			"$set": bson.M{
+				"is_active":        false,
+				"last_activity_at": time.Now(),
+			},
+		},
+	)
+	return err
 }
