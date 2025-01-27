@@ -26,7 +26,7 @@ func ChangeEmailHandler(c *gin.Context) {
 		return
 	}
 
-	userRepo := repository.GetUsersRepo(utils.MongoClient)
+	userRepo := repository.GetUserRepo(utils.MongoClient)
 	currentUser, err := userRepo.FindUser(userID.(string))
 	if err != nil {
 		log.Printf("Error fetching user %s: %v", userID, err)

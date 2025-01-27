@@ -24,7 +24,7 @@ func TestUserRepoOperations(t *testing.T) {
 
 	// Use environment variables for database and collection names
 	coll := client.Database(os.Getenv("MONGO_DB")).Collection(os.Getenv("USERS_COLLECTION"))
-	userRepo := repository.UsersRepo{MongoCollection: coll}
+	userRepo := repository.UserRepo{MongoCollection: coll}
 
 	// Adding Users!
 	t.Run("CreateUser", func(t *testing.T) {

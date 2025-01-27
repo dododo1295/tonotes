@@ -23,7 +23,7 @@ func LoginHandler(c *gin.Context, sessionRepo *repository.SessionRepo) {
 		return
 	}
 
-	userRepo := repository.GetUsersRepo(utils.MongoClient)
+	userRepo := repository.GetUserRepo(utils.MongoClient)
 	userService := &usecase.UserService{
 		UsersRepo: userRepo,
 	}

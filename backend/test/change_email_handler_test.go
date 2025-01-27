@@ -48,7 +48,7 @@ func TestChangeEmailHandler(t *testing.T) {
 		setupAuth     func() string
 		requestBody   map[string]interface{}
 		expectedCode  int
-		setupTestData func(t *testing.T, userRepo *repository.UsersRepo) string
+		setupTestData func(t *testing.T, userRepo *repository.UserRepo) string
 		checkResponse func(*testing.T, *httptest.ResponseRecorder)
 	}{
 		{
@@ -61,7 +61,7 @@ func TestChangeEmailHandler(t *testing.T) {
 				"new_email": "newemail@example.com",
 			},
 			expectedCode: http.StatusOK,
-			setupTestData: func(t *testing.T, userRepo *repository.UsersRepo) string {
+			setupTestData: func(t *testing.T, userRepo *repository.UserRepo) string {
 				userID := uuid.New().String()
 				user := &model.User{
 					UserID:          userID,
@@ -108,7 +108,7 @@ func TestChangeEmailHandler(t *testing.T) {
 				"new_email": "old@example.com",
 			},
 			expectedCode: http.StatusBadRequest,
-			setupTestData: func(t *testing.T, userRepo *repository.UsersRepo) string {
+			setupTestData: func(t *testing.T, userRepo *repository.UserRepo) string {
 				userID := uuid.New().String()
 				user := &model.User{
 					UserID:          userID,
@@ -146,7 +146,7 @@ func TestChangeEmailHandler(t *testing.T) {
 				"new_email": "newemail@example.com",
 			},
 			expectedCode: http.StatusTooManyRequests,
-			setupTestData: func(t *testing.T, userRepo *repository.UsersRepo) string {
+			setupTestData: func(t *testing.T, userRepo *repository.UserRepo) string {
 				userID := uuid.New().String()
 				user := &model.User{
 					UserID:          userID,
@@ -189,7 +189,7 @@ func TestChangeEmailHandler(t *testing.T) {
 				"new_email": "invalid-email",
 			},
 			expectedCode: http.StatusBadRequest,
-			setupTestData: func(t *testing.T, userRepo *repository.UsersRepo) string {
+			setupTestData: func(t *testing.T, userRepo *repository.UserRepo) string {
 				userID := uuid.New().String()
 				user := &model.User{
 					UserID:          userID,
@@ -226,7 +226,7 @@ func TestChangeEmailHandler(t *testing.T) {
 				t.Fatalf("Failed to clear users collection: %v", err)
 			}
 
-			userRepo := repository.GetUsersRepo(utils.MongoClient)
+			userRepo := repository.GetUserRepo(utils.MongoClient)
 			userID := tt.setupTestData(t, userRepo)
 
 			// Create request

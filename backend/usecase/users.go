@@ -16,7 +16,7 @@ import (
 )
 
 type UserService struct {
-	UsersRepo *repository.UsersRepo
+	UsersRepo *repository.UserRepo
 }
 
 type Response struct {

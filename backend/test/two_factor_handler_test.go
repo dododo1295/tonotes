@@ -73,7 +73,7 @@ func TestTwoFactorHandler(t *testing.T) {
 		path          string
 		inputJSON     string
 		expectedCode  int
-		setupMockDB   func(t *testing.T, userRepo *repository.UsersRepo)
+		setupMockDB   func(t *testing.T, userRepo *repository.UserRepo)
 		checkResponse func(*testing.T, *httptest.ResponseRecorder)
 	}{
 		{
@@ -81,7 +81,7 @@ func TestTwoFactorHandler(t *testing.T) {
 			method:       "GET",
 			path:         "/2fa/generate",
 			expectedCode: http.StatusOK,
-			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
+			setupMockDB: func(t *testing.T, userRepo *repository.UserRepo) {
 				user := &model.User{
 					UserID:           "test-user-id",
 					Username:         "test@example.com",
@@ -130,7 +130,7 @@ func TestTwoFactorHandler(t *testing.T) {
                 }`, secret, code)
 			}(),
 			expectedCode: http.StatusOK,
-			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
+			setupMockDB: func(t *testing.T, userRepo *repository.UserRepo) {
 				user := &model.User{
 					UserID:           "test-user-id",
 					Username:         "test@example.com",
@@ -174,7 +174,7 @@ func TestTwoFactorHandler(t *testing.T) {
 				t.Fatalf("Failed to clear users collection: %v", err)
 			}
 
-			userRepo := repository.GetUsersRepo(utils.MongoClient)
+			userRepo := repository.GetUserRepo(utils.MongoClient)
 			tt.setupMockDB(t, userRepo)
 
 			w := httptest.NewRecorder()

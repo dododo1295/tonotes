@@ -10,14 +10,14 @@ import (
 )
 
 type StatsHandler struct {
-	userRepo    *repository.UsersRepo
+	userRepo    *repository.UserRepo
 	notesRepo   *repository.NotesRepo
 	todoRepo    *repository.TodosRepo
 	sessionRepo *repository.SessionRepo
 }
 
 func NewStatsHandler(
-	userRepo *repository.UsersRepo,
+	userRepo *repository.UserRepo,
 	notesRepo *repository.NotesRepo,
 	todoRepo *repository.TodosRepo,
 	sessionRepo *repository.SessionRepo,

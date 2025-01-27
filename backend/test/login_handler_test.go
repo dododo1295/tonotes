@@ -87,7 +87,7 @@ func TestLoginHandler(t *testing.T) {
 		name          string
 		inputJSON     string
 		expectedCode  int
-		setupMockDB   func(t *testing.T, userRepo *repository.UsersRepo)
+		setupMockDB   func(t *testing.T, userRepo *repository.UserRepo)
 		checkResponse func(*testing.T, *httptest.ResponseRecorder, *repository.SessionRepo)
 	}{
 		{
@@ -97,7 +97,7 @@ func TestLoginHandler(t *testing.T) {
                 "password": "Test123!@#"
             }`,
 			expectedCode: http.StatusOK,
-			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
+			setupMockDB: func(t *testing.T, userRepo *repository.UserRepo) {
 				t.Log("Setting up test case: Successful login - No 2FA")
 
 				collection := utils.MongoClient.Database("tonotes_test").Collection("users")
@@ -151,7 +151,7 @@ func TestLoginHandler(t *testing.T) {
                 "password": "Test123!@#"
             }`,
 			expectedCode: http.StatusOK,
-			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
+			setupMockDB: func(t *testing.T, userRepo *repository.UserRepo) {
 				t.Log("Setting up test case: 2FA Required - No Code Provided")
 
 				collection := utils.MongoClient.Database("tonotes_test").Collection("users")
@@ -221,7 +221,7 @@ func TestLoginHandler(t *testing.T) {
                 }`, validCode)
 			}(),
 			expectedCode: http.StatusOK,
-			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
+			setupMockDB: func(t *testing.T, userRepo *repository.UserRepo) {
 				t.Log("Setting up test case: 2FA Success - With Valid Code")
 
 				collection := utils.MongoClient.Database("tonotes_test").Collection("users")
@@ -281,7 +281,7 @@ func TestLoginHandler(t *testing.T) {
                 "password": "Test123!@#"
             }`,
 			expectedCode: http.StatusOK,
-			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
+			setupMockDB: func(t *testing.T, userRepo *repository.UserRepo) {
 				t.Log("Setting up test case: Login with max sessions")
 
 				collection := utils.MongoClient.Database("tonotes_test").Collection("users")
@@ -385,7 +385,7 @@ func TestLoginHandler(t *testing.T) {
                 }`, validCode)
 			}(),
 			expectedCode: http.StatusOK,
-			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
+			setupMockDB: func(t *testing.T, userRepo *repository.UserRepo) {
 				t.Log("Setting up test case: 2FA Success - Time-based Code Validation")
 
 				collection := utils.MongoClient.Database("tonotes_test").Collection("users")
@@ -460,7 +460,7 @@ func TestLoginHandler(t *testing.T) {
                 }`, expiredCode)
 			}(),
 			expectedCode: http.StatusUnauthorized,
-			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
+			setupMockDB: func(t *testing.T, userRepo *repository.UserRepo) {
 				t.Log("Setting up test case: 2FA Failure - Expired Code")
 
 				collection := utils.MongoClient.Database("tonotes_test").Collection("users")
@@ -524,7 +524,7 @@ func TestLoginHandler(t *testing.T) {
 				}
 			}
 
-			userRepo := repository.GetUsersRepo(utils.MongoClient)
+			userRepo := repository.GetUserRepo(utils.MongoClient)
 			t.Log("Setting up mock database")
 			tt.setupMockDB(t, userRepo)
 

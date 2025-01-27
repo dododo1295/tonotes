@@ -18,21 +18,21 @@ import (
 var mongoClient *mongo.Client
 
 // Constructor function for UsersRepo
-func GetUsersRepo(client *mongo.Client) *UsersRepo {
+func GetUserRepo(client *mongo.Client) *UserRepo {
 	dbName := os.Getenv("MONGO_DB")
 	collectionName := os.Getenv("USERS_COLLECTION")
-	return &UsersRepo{
+	return &UserRepo{
 		MongoCollection: client.Database(dbName).Collection(collectionName),
 	}
 }
 
 // Getting DB
-type UsersRepo struct {
+type UserRepo struct {
 	MongoCollection *mongo.Collection
 }
 
 // Creating User
-func (r *UsersRepo) AddUser(ctx context.Context, user *model.User) (interface{}, error) {
+func (r *UserRepo) AddUser(ctx context.Context, user *model.User) (interface{}, error) {
 	if user.Username == "" || user.Password == "" {
 		return nil, errors.New("username and password required")
 	}
@@ -45,7 +45,7 @@ func (r *UsersRepo) AddUser(ctx context.Context, user *model.User) (interface{},
 }
 
 // Finding via username
-func (r *UsersRepo) FindUserByUsername(username string) (*model.User, error) {
+func (r *UserRepo) FindUserByUsername(username string) (*model.User, error) {
 	var user model.User
 	filter := bson.D{{Key: "username", Value: username}}
 
@@ -63,7 +63,7 @@ func (r *UsersRepo) FindUserByUsername(username string) (*model.User, error) {
 }
 
 // Finding UserID
-func (r *UsersRepo) FindUser(userID string) (*model.User, error) {
+func (r *UserRepo) FindUser(userID string) (*model.User, error) {
 	var user model.User
 	err := r.MongoCollection.FindOne(context.Background(),
 		bson.D{{Key: "user_id", Value: userID}}).Decode(&user)
@@ -80,7 +80,7 @@ func (r *UsersRepo) FindUser(userID string) (*model.User, error) {
 
 // Updating User Password
 // hashing on the front end, DUH
-func (r *UsersRepo) UpdateUserPassword(userID string, hashedPassword string) (int64, error) {
+func (r *UserRepo) UpdateUserPassword(userID string, hashedPassword string) (int64, error) {
 	// return error if the password isn't hashed properly
 	if hashedPassword == "" {
 		return 0, fmt.Errorf("password hashing error")
@@ -102,7 +102,7 @@ func (r *UsersRepo) UpdateUserPassword(userID string, hashedPassword string) (in
 }
 
 // Updating Username
-func (r *UsersRepo) UpdateUserByID(userID string, updateID *model.User) (int64, error) {
+func (r *UserRepo) UpdateUserByID(userID string, updateID *model.User) (int64, error) {
 	filter := bson.D{{Key: "user_id", Value: userID}}
 	// setting to only update the username
 	update := bson.D{
@@ -120,7 +120,7 @@ func (r *UsersRepo) UpdateUserByID(userID string, updateID *model.User) (int64, 
 }
 
 // Deleting Users
-func (r *UsersRepo) DeleteUserByID(userID string) (int64, error) {
+func (r *UserRepo) DeleteUserByID(userID string) (int64, error) {
 	result, err := r.MongoCollection.DeleteOne(context.Background(),
 		bson.D{{Key: "user_id", Value: userID}})
 	if err != nil {
@@ -131,7 +131,7 @@ func (r *UsersRepo) DeleteUserByID(userID string) (int64, error) {
 
 // Updating email
 
-func (r *UsersRepo) UpdateUserEmail(userID string, email string) (int64, error) {
+func (r *UserRepo) UpdateUserEmail(userID string, email string) (int64, error) {
 	filter := bson.M{"user_id": userID}
 	update := bson.M{
 		"$set": bson.M{
@@ -146,7 +146,7 @@ func (r *UsersRepo) UpdateUserEmail(userID string, email string) (int64, error) 
 	return result.ModifiedCount, nil
 }
 
-func (r *UsersRepo) Enable2FAWithRecoveryCodes(userID, secret string, recoveryCodes []string) error {
+func (r *UserRepo) Enable2FAWithRecoveryCodes(userID, secret string, recoveryCodes []string) error {
 	filter := bson.M{"user_id": userID}
 	update := bson.M{
 		"$set": bson.M{
@@ -168,7 +168,7 @@ func (r *UsersRepo) Enable2FAWithRecoveryCodes(userID, secret string, recoveryCo
 	return nil
 }
 
-func (r *UsersRepo) UpdateRecoveryCodes(userID string, codes []string) error {
+func (r *UserRepo) UpdateRecoveryCodes(userID string, codes []string) error {
 	filter := bson.M{"user_id": userID}
 	update := bson.M{
 		"$set": bson.M{
@@ -188,7 +188,7 @@ func (r *UsersRepo) UpdateRecoveryCodes(userID string, codes []string) error {
 	return nil
 }
 
-func (r *UsersRepo) Disable2FA(userID string) error {
+func (r *UserRepo) Disable2FA(userID string) error {
 	filter := bson.M{"user_id": userID}
 	update := bson.M{
 		"$set": bson.M{

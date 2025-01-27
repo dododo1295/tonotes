@@ -28,7 +28,7 @@ func ChangePasswordHandler(c *gin.Context) {
 		return
 	}
 
-	userRepo := repository.GetUsersRepo(utils.MongoClient)
+	userRepo := repository.GetUserRepo(utils.MongoClient)
 	userService := &usecase.UserService{
 		UsersRepo: userRepo,
 	}

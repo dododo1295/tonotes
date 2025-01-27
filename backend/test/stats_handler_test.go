@@ -22,7 +22,7 @@ import (
 )
 
 // Setup function for stats testing
-func setupStatsHandler(t *testing.T) (*gin.Engine, *mongo.Client, *repository.UsersRepo, *repository.NotesRepo, *repository.TodosRepo, *repository.SessionRepo, func()) {
+func setupStatsHandler(t *testing.T) (*gin.Engine, *mongo.Client, *repository.UserRepo, *repository.NotesRepo, *repository.TodosRepo, *repository.SessionRepo, func()) {
 	// Set all required environment variables
 	envVars := map[string]string{
 		"MONGO_DB":           "tonotes_test",
@@ -50,7 +50,7 @@ func setupStatsHandler(t *testing.T) (*gin.Engine, *mongo.Client, *repository.Us
 	}
 
 	// Initialize repositories with correct collection references
-	userRepo := &repository.UsersRepo{
+	userRepo := &repository.UserRepo{
 		MongoCollection: db.Collection("users"),
 	}
 	notesRepo := &repository.NotesRepo{

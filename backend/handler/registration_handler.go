@@ -40,7 +40,7 @@ func RegistrationHandler(c *gin.Context) {
 	// Debug logging
 	fmt.Printf("Using database: %s\n", dbName)
 
-	userRepo := repository.GetUsersRepo(utils.MongoClient)
+	userRepo := repository.GetUserRepo(utils.MongoClient)
 	userService := &usecase.UserService{
 		UsersRepo: userRepo,
 	}

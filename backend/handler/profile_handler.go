@@ -16,7 +16,7 @@ func GetUserProfileHandler(c *gin.Context) {
 	}
 
 	userService := &usecase.UserService{
-		UsersRepo: repository.GetUsersRepo(utils.MongoClient),
+		UsersRepo: repository.GetUserRepo(utils.MongoClient),
 	}
 
 	profile, err := userService.GetUserProfile(userID.(string))

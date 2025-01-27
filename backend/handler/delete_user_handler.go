@@ -15,7 +15,7 @@ func DeleteUserHandler(c *gin.Context) {
 		return
 	}
 
-	userRepo := repository.GetUsersRepo(utils.MongoClient)
+	userRepo := repository.GetUserRepo(utils.MongoClient)
 	sessionRepo := repository.GetSessionRepo(utils.MongoClient)
 
 	// End all sessions for the user

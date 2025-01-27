@@ -53,14 +53,14 @@ func TestGetUserProfileHandler(t *testing.T) {
 		name          string
 		userID        string
 		expectedCode  int
-		setupMockDB   func(t *testing.T, userRepo *repository.UsersRepo)
+		setupMockDB   func(t *testing.T, userRepo *repository.UserRepo)
 		checkResponse func(*testing.T, *httptest.ResponseRecorder)
 	}{
 		{
 			name:         "Successful Profile Fetch",
 			userID:       "test-uuid",
 			expectedCode: http.StatusOK,
-			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
+			setupMockDB: func(t *testing.T, userRepo *repository.UserRepo) {
 				testUser := model.User{
 					UserID:    "test-uuid",
 					Username:  "testuser",
@@ -104,7 +104,7 @@ func TestGetUserProfileHandler(t *testing.T) {
 			name:         "User Not Found",
 			userID:       "nonexistent-uuid",
 			expectedCode: http.StatusNotFound,
-			setupMockDB:  func(t *testing.T, userRepo *repository.UsersRepo) {},
+			setupMockDB:  func(t *testing.T, userRepo *repository.UserRepo) {},
 			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var response utils.Response
 				err := json.Unmarshal(w.Body.Bytes(), &response)
@@ -125,7 +125,7 @@ func TestGetUserProfileHandler(t *testing.T) {
 				t.Fatalf("Failed to clear test database: %v", err)
 			}
 
-			userRepo := repository.GetUsersRepo(utils.MongoClient)
+			userRepo := repository.GetUserRepo(utils.MongoClient)
 			tt.setupMockDB(t, userRepo)
 
 			w := httptest.NewRecorder()

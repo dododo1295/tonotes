@@ -30,7 +30,7 @@ func Enable2FAHandler(c *gin.Context) {
 	}
 
 	userID, _ := c.Get("user_id")
-	userRepo := repository.GetUsersRepo(utils.MongoClient)
+	userRepo := repository.GetUserRepo(utils.MongoClient)
 
 	// Check if 2FA is already enabled
 	user, err := userRepo.FindUser(userID.(string))
@@ -86,7 +86,7 @@ func UseRecoveryCodeHandler(c *gin.Context) {
 	}
 
 	userID, _ := c.Get("user_id")
-	userRepo := repository.GetUsersRepo(utils.MongoClient)
+	userRepo := repository.GetUserRepo(utils.MongoClient)
 	user, err := userRepo.FindUser(userID.(string))
 	if err != nil {
 		utils.InternalError(c, "Failed to fetch user")
@@ -129,125 +129,125 @@ func UseRecoveryCodeHandler(c *gin.Context) {
 
 // Generate2FASecretHandler generates a new 2FA secret and QR code
 func Generate2FASecretHandler(c *gin.Context) {
-    userID, exists := c.Get("user_id")
-    if !exists {
-        utils.Unauthorized(c, "Missing or invalid token")
-        return
-    }
+	userID, exists := c.Get("user_id")
+	if !exists {
+		utils.Unauthorized(c, "Missing or invalid token")
+		return
+	}
 
-    userRepo := repository.GetUsersRepo(utils.MongoClient)
-    user, err := userRepo.FindUser(userID.(string))
-    if err != nil {
-        utils.InternalError(c, "Failed to fetch user")
-        return
-    }
+	userRepo := repository.GetUserRepo(utils.MongoClient)
+	user, err := userRepo.FindUser(userID.(string))
+	if err != nil {
+		utils.InternalError(c, "Failed to fetch user")
+		return
+	}
 
-    if user.TwoFactorEnabled {
-        utils.BadRequest(c, "2FA is already enabled")
-        return
-    }
+	if user.TwoFactorEnabled {
+		utils.BadRequest(c, "2FA is already enabled")
+		return
+	}
 
-    // Generate new TOTP key
-    key, err := totp.Generate(totp.GenerateOpts{
-        Issuer:      "ToNotes",
-        AccountName: user.Email,
-    })
-    if err != nil {
-        utils.InternalError(c, "Failed to generate 2FA secret")
-        return
-    }
+	// Generate new TOTP key
+	key, err := totp.Generate(totp.GenerateOpts{
+		Issuer:      "ToNotes",
+		AccountName: user.Email,
+	})
+	if err != nil {
+		utils.InternalError(c, "Failed to generate 2FA secret")
+		return
+	}
 
-    // Generate QR code
-    var buf bytes.Buffer
-    img, err := key.Image(200, 200)
-    if err != nil {
-        utils.InternalError(c, "Failed to generate QR code")
-        return
-    }
+	// Generate QR code
+	var buf bytes.Buffer
+	img, err := key.Image(200, 200)
+	if err != nil {
+		utils.InternalError(c, "Failed to generate QR code")
+		return
+	}
 
-    if err := png.Encode(&buf, img); err != nil {
-        utils.InternalError(c, "Failed to encode QR code")
-        return
-    }
+	if err := png.Encode(&buf, img); err != nil {
+		utils.InternalError(c, "Failed to encode QR code")
+		return
+	}
 
-    qrCode := base64.StdEncoding.EncodeToString(buf.Bytes())
+	qrCode := base64.StdEncoding.EncodeToString(buf.Bytes())
 
-    utils.Success(c, Enable2FAResponse{
-        Secret: key.Secret(),
-        QRCode: "data:image/png;base64," + qrCode,
-    })
+	utils.Success(c, Enable2FAResponse{
+		Secret: key.Secret(),
+		QRCode: "data:image/png;base64," + qrCode,
+	})
 }
 
 // Verify2FAHandler verifies a 2FA code
 func Verify2FAHandler(c *gin.Context) {
-    var req struct {
-        Code string `json:"code" binding:"required"`
-    }
+	var req struct {
+		Code string `json:"code" binding:"required"`
+	}
 
-    if err := c.ShouldBindJSON(&req); err != nil {
-        utils.BadRequest(c, "Invalid request")
-        return
-    }
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequest(c, "Invalid request")
+		return
+	}
 
-    userID, _ := c.Get("user_id")
-    userRepo := repository.GetUsersRepo(utils.MongoClient)
-    user, err := userRepo.FindUser(userID.(string))
-    if err != nil {
-        utils.InternalError(c, "Failed to fetch user")
-        return
-    }
+	userID, _ := c.Get("user_id")
+	userRepo := repository.GetUserRepo(utils.MongoClient)
+	user, err := userRepo.FindUser(userID.(string))
+	if err != nil {
+		utils.InternalError(c, "Failed to fetch user")
+		return
+	}
 
-    if !user.TwoFactorEnabled {
-        utils.BadRequest(c, "2FA is not enabled")
-        return
-    }
+	if !user.TwoFactorEnabled {
+		utils.BadRequest(c, "2FA is not enabled")
+		return
+	}
 
-    valid := totp.Validate(req.Code, user.TwoFactorSecret)
-    if !valid {
-        utils.Unauthorized(c, "Invalid 2FA code")
-        return
-    }
+	valid := totp.Validate(req.Code, user.TwoFactorSecret)
+	if !valid {
+		utils.Unauthorized(c, "Invalid 2FA code")
+		return
+	}
 
-    utils.Success(c, gin.H{"message": "2FA code valid"})
+	utils.Success(c, gin.H{"message": "2FA code valid"})
 }
 
 // Disable2FAHandler disables 2FA for the user
 func Disable2FAHandler(c *gin.Context) {
-    var req struct {
-        Code string `json:"code" binding:"required"`
-    }
+	var req struct {
+		Code string `json:"code" binding:"required"`
+	}
 
-    if err := c.ShouldBindJSON(&req); err != nil {
-        utils.BadRequest(c, "Invalid request")
-        return
-    }
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequest(c, "Invalid request")
+		return
+	}
 
-    userID, _ := c.Get("user_id")
-    userRepo := repository.GetUsersRepo(utils.MongoClient)
-    user, err := userRepo.FindUser(userID.(string))
-    if err != nil {
-        utils.InternalError(c, "Failed to fetch user")
-        return
-    }
+	userID, _ := c.Get("user_id")
+	userRepo := repository.GetUserRepo(utils.MongoClient)
+	user, err := userRepo.FindUser(userID.(string))
+	if err != nil {
+		utils.InternalError(c, "Failed to fetch user")
+		return
+	}
 
-    if !user.TwoFactorEnabled {
-        utils.BadRequest(c, "2FA is not enabled")
-        return
-    }
+	if !user.TwoFactorEnabled {
+		utils.BadRequest(c, "2FA is not enabled")
+		return
+	}
 
-    // Verify the code before disabling
-    valid := totp.Validate(req.Code, user.TwoFactorSecret)
-    if !valid {
-        utils.Unauthorized(c, "Invalid 2FA code")
-        return
-    }
+	// Verify the code before disabling
+	valid := totp.Validate(req.Code, user.TwoFactorSecret)
+	if !valid {
+		utils.Unauthorized(c, "Invalid 2FA code")
+		return
+	}
 
-    // Disable 2FA
-    err = userRepo.Disable2FA(userID.(string))
-    if err != nil {
-        utils.InternalError(c, "Failed to disable 2FA")
-        return
-    }
+	// Disable 2FA
+	err = userRepo.Disable2FA(userID.(string))
+	if err != nil {
+		utils.InternalError(c, "Failed to disable 2FA")
+		return
+	}
 
-    utils.Success(c, gin.H{"message": "2FA disabled successfully"})
+	utils.Success(c, gin.H{"message": "2FA disabled successfully"})
 }
