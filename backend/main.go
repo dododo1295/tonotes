@@ -21,6 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/joho/godotenv"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
@@ -169,6 +170,9 @@ func setupRouter() *gin.Engine {
 		todosRepo,
 		sessionRepo,
 	)
+
+	// Metrics route
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// Health check with detailed status
 	router.GET("/health", func(c *gin.Context) {
