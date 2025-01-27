@@ -5,56 +5,77 @@ import (
 	"fmt"
 	"main/model"
 	"main/repository"
+	"main/test/testutils"
 	"main/usecase"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func init() {
-	os.Setenv("GO_ENV", "test")
-	os.Setenv("MONGO_DB", "tonotes_test")
-	gin.SetMode(gin.TestMode)
-}
-
 func setupNotesUsecaseTest(t *testing.T) (*mongo.Client, *usecase.NotesService, func()) {
-	client, err := mongo.Connect(context.Background(),
-		options.Client().ApplyURI("mongodb://localhost:27017"))
-	if err != nil {
-		t.Fatalf("Failed to connect to MongoDB: %v", err)
+	// Use testutils for environment and database setup
+	testutils.SetupTestEnvironment()
+	client, cleanup := testutils.SetupTestDB(t)
+
+	// Get database reference
+	db := client.Database(os.Getenv("MONGO_DB"))
+
+	// Create notes collection explicitly
+	err := db.CreateCollection(context.Background(), "notes")
+	if err != nil && !strings.Contains(err.Error(), "NamespaceExists") {
+		t.Fatalf("Failed to create notes collection: %v", err)
 	}
 
-	db := client.Database("tonotes_test")
-
-	// Ensure indexes are created before running tests
-	err = repository.SetupIndexes(db)
-	if err != nil {
-		t.Fatalf("Failed to setup indexes: %v", err)
+	// Create text index for search functionality
+	indexModel := mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "title", Value: "text"},
+			{Key: "content", Value: "text"},
+			{Key: "tags", Value: "text"},
+		},
+		Options: options.Index().
+			SetName("text_search").
+			SetWeights(bson.D{
+				{Key: "title", Value: 10},
+				{Key: "content", Value: 5},
+				{Key: "tags", Value: 3},
+			}),
 	}
 
+	collection := db.Collection("notes")
+	_, err = collection.Indexes().CreateOne(context.Background(), indexModel)
+	if err != nil {
+		t.Fatalf("Failed to create text index: %v", err)
+	}
+
+	// Initialize repository with correct database reference
 	notesRepo := repository.GetNotesRepo(client)
+	notesRepo.MongoCollection = collection
+
 	notesService := &usecase.NotesService{
 		NotesRepo: notesRepo,
 	}
 
-	cleanup := func() {
-		if err := client.Database("tonotes_test").Collection("notes").Drop(context.Background()); err != nil {
-			t.Errorf("Failed to clean up test collection: %v", err)
+	// Return cleanup function that properly handles disconnection
+	combinedCleanup := func() {
+		t.Log("Running cleanup")
+		// Drop collection first
+		if err := collection.Drop(context.Background()); err != nil {
+			t.Logf("Warning: Failed to drop collection: %v", err)
 		}
-		if err := client.Disconnect(context.Background()); err != nil {
-			t.Errorf("Failed to disconnect from MongoDB: %v", err)
-		}
+		// Then run the original cleanup
+		cleanup()
 	}
 
-	return client, notesService, cleanup
+	return client, notesService, combinedCleanup
 }
+
 func TestSearchNotes(t *testing.T) {
 	_, svc, cleanup := setupNotesUsecaseTest(t)
 	defer cleanup()

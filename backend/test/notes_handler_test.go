@@ -6,47 +6,39 @@ import (
 	"encoding/json"
 	"main/handler"
 	"main/repository"
+	"main/test/testutils"
 	"main/usecase"
 	"main/utils"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func init() {
-	os.Setenv("GO_ENV", "test")
-	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
-	os.Setenv("MONGO_DB", "tonotes_test")
-}
-
 func TestCreateNoteHandler(t *testing.T) {
-	// Set up environment
-	os.Setenv("GO_ENV", "test")
-	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
-	os.Setenv("MONGO_DB", "tonotes_test")
+	// Use testutils for environment and database setup
+	testutils.SetupTestEnvironment()
+	client, cleanup := testutils.SetupTestDB(t)
+	defer cleanup()
 
-	// Connect to test database
-	testClient, err := mongo.Connect(context.Background(),
-		options.Client().ApplyURI(os.Getenv("MONGO_URI")))
-	if err != nil {
-		t.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-	defer testClient.Disconnect(context.Background())
+	utils.MongoClient = client
 
-	utils.MongoClient = testClient
+	// Get database reference using environment variable
+	db := client.Database(os.Getenv("MONGO_DB"))
 
-	// Drop test collection before starting
-	if err := testClient.Database("tonotes_test").Collection("notes").Drop(context.Background()); err != nil {
-		t.Fatalf("Failed to clear test collection: %v", err)
+	// Create notes collection explicitly
+	err := db.CreateCollection(context.Background(), "notes")
+	if err != nil && !strings.Contains(err.Error(), "NamespaceExists") {
+		t.Fatalf("Failed to create notes collection: %v", err)
 	}
 
-	// Initialize repository and service
-	notesRepo := repository.GetNotesRepo(testClient)
+	// Initialize repository with correct database reference
+	notesRepo := repository.GetNotesRepo(client)
+	notesRepo.MongoCollection = db.Collection("notes") // Explicitly set collection
+
 	notesService := &usecase.NotesService{
 		NotesRepo: notesRepo,
 	}
@@ -148,11 +140,17 @@ func TestCreateNoteHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Clear collection before each test
-			if err := testClient.Database("tonotes_test").Collection("notes").Drop(context.Background()); err != nil {
-				t.Fatalf("Failed to clear notes collection: %v", err)
+			if err := db.Collection("notes").Drop(context.Background()); err != nil {
+				t.Logf("Warning dropping collection: %v", err)
 			}
 
-			// Setup any test data if needed
+			// Recreate collection
+			err := db.CreateCollection(context.Background(), "notes")
+			if err != nil && !strings.Contains(err.Error(), "NamespaceExists") {
+				t.Fatalf("Failed to create notes collection: %v", err)
+			}
+
+			// Setup test data if needed
 			if tt.setupTestData != nil {
 				if err := tt.setupTestData(); err != nil {
 					t.Fatalf("Failed to setup test data: %v", err)
@@ -167,7 +165,7 @@ func TestCreateNoteHandler(t *testing.T) {
 			t.Logf("Making request with body: %s", tt.inputJSON)
 
 			// Count documents before request
-			count, err := testClient.Database("tonotes_test").Collection("notes").CountDocuments(context.Background(), map[string]interface{}{})
+			count, err := db.Collection("notes").CountDocuments(context.Background(), map[string]interface{}{})
 			if err != nil {
 				t.Fatalf("Failed to count documents: %v", err)
 			}
@@ -180,18 +178,16 @@ func TestCreateNoteHandler(t *testing.T) {
 			t.Logf("Response Body: %s", w.Body.String())
 
 			// Count documents after request
-			count, err = testClient.Database("tonotes_test").Collection("notes").CountDocuments(context.Background(), map[string]interface{}{})
+			count, err = db.Collection("notes").CountDocuments(context.Background(), map[string]interface{}{})
 			if err != nil {
 				t.Fatalf("Failed to count documents: %v", err)
 			}
 			t.Logf("Documents in collection after request: %d", count)
 
-			// Check status code
 			if w.Code != tt.expectedCode {
 				t.Errorf("Expected status code %d, got %d", tt.expectedCode, w.Code)
 			}
 
-			// Run custom response checks
 			tt.checkResponse(t, w)
 		})
 	}

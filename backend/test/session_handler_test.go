@@ -1,238 +1,251 @@
 package test
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"main/handler"
 	"main/model"
 	"main/repository"
+	"main/test/testutils"
 	"main/utils"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func init() {
-	fmt.Println("Setting up session handler test environment")
-	os.Setenv("GO_ENV", "test")
-	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
-	os.Setenv("MONGO_DB", "tonotes_test")
-	os.Setenv("SESSION_COLLECTION", "sessions")
-}
+func TestSessionHandler(t *testing.T) {
+	// Setup
+	testutils.SetupTestEnvironment()
+	client, cleanup := testutils.SetupTestDB(t)
+	defer cleanup()
 
-func TestSessionHandlers(t *testing.T) {
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://localhost:27017"))
-	if err != nil {
-		t.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-	defer client.Disconnect(context.Background())
-
+	// Set the global MongoDB client for utils package
 	utils.MongoClient = client
+
+	// Initialize session repository
 	sessionRepo := repository.GetSessionRepo(client)
 
 	gin.SetMode(gin.TestMode)
 
-	tests := []struct {
-		name          string
-		endpoint      string
-		method        string
-		userID        string
-		setupData     func(t *testing.T) string // returns sessionID if needed
-		expectedCode  int
-		checkResponse func(*testing.T, *httptest.ResponseRecorder)
-	}{
-		{
-			name:     "Get Active Sessions - Success",
-			endpoint: "/sessions",
-			method:   http.MethodGet,
-			userID:   "test-user-id",
-			setupData: func(t *testing.T) string {
-				session := &model.Session{
-					SessionID:      uuid.New().String(),
-					UserID:        "test-user-id",
-					DisplayName:   "Test Session",
-					DeviceInfo:    "Test Device",
-					CreatedAt:     time.Now(),
-					ExpiresAt:     time.Now().Add(24 * time.Hour),
-					IsActive:      true,
-				}
-				err := sessionRepo.CreateSession(session)
-				if err != nil {
-					t.Fatalf("Failed to create test session: %v", err)
-				}
-				return session.SessionID
-			},
-			expectedCode: http.StatusOK,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var response utils.Response
-				err := json.Unmarshal(w.Body.Bytes(), &response)
-				if err != nil {
-					t.Fatalf("Failed to parse response: %v", err)
-				}
+	t.Run("GetActiveSessions", func(t *testing.T) {
+		// Setup
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
 
-				data, ok := response.Data.(map[string]interface{})
-				if !ok {
-					t.Fatal("Response missing data object")
-				}
+		// Create test session
+		testSession := &model.Session{
+			SessionID:      uuid.New().String(),
+			UserID:         "test-user",
+			DisplayName:    "Test Session",
+			DeviceInfo:     "Test Device",
+			IPAddress:      "127.0.0.1",
+			Location:       "Test Location",
+			CreatedAt:      time.Now(),
+			LastActivityAt: time.Now(),
+			ExpiresAt:      time.Now().Add(24 * time.Hour),
+			IsActive:       true,
+		}
+		if err := sessionRepo.CreateSession(testSession); err != nil {
+			t.Fatalf("Failed to create test session: %v", err)
+		}
 
-				sessions, ok := data["sessions"].([]interface{})
-				if !ok {
-					t.Fatal("Response missing sessions array")
-				}
+		// Set user context
+		c.Set("user_id", "test-user")
+		c.Set("session_id", testSession.SessionID)
 
-				if len(sessions) != 1 {
-					t.Errorf("Expected 1 session, got %d", len(sessions))
-				}
-			},
-		},
-		{
-			name:     "Logout All Sessions - Success",
-			endpoint: "/sessions/logout-all",
-			method:   http.MethodPost,
-			userID:   "test-user-id",
-			setupData: func(t *testing.T) string {
-				// Create multiple sessions
-				for i := 0; i < 3; i++ {
-					session := &model.Session{
-						SessionID:    uuid.New().String(),
-						UserID:      "test-user-id",
-						DisplayName: fmt.Sprintf("Test Session %d", i),
-						DeviceInfo:  "Test Device",
-						CreatedAt:   time.Now(),
-						ExpiresAt:   time.Now().Add(24 * time.Hour),
-						IsActive:    true,
-					}
-					err := sessionRepo.CreateSession(session)
-					if err != nil {
-						t.Fatalf("Failed to create test session: %v", err)
-					}
-				}
-				return ""
-			},
-			expectedCode: http.StatusOK,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var response utils.Response
-				err := json.Unmarshal(w.Body.Bytes(), &response)
-				if err != nil {
-					t.Fatalf("Failed to parse response: %v", err)
-				}
+		// Test
+		handler.GetActiveSessions(c, sessionRepo)
 
-				data, ok := response.Data.(map[string]interface{})
-				if !ok {
-					t.Fatal("Response missing data object")
-				}
+		// Assertions
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
+		}
 
-				msg, ok := data["message"].(string)
-				if !ok || msg != "Successfully logged out of all sessions" {
-					t.Errorf("Expected success message, got %v", msg)
-				}
+		var response utils.Response
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("Failed to parse response: %v", err)
+		}
 
-				// Verify all sessions are ended
-				activeSessions, _ := sessionRepo.GetUserActiveSessions("test-user-id")
-				if len(activeSessions) != 0 {
-					t.Errorf("Expected 0 active sessions, got %d", len(activeSessions))
-				}
-			},
-		},
-		{
-			name:     "Logout Specific Session - Success",
-			endpoint: "/sessions/{session_id}/logout",
-			method:   http.MethodPost,
-			userID:   "test-user-id",
-			setupData: func(t *testing.T) string {
-				session := &model.Session{
-					SessionID:    uuid.New().String(),
-					UserID:      "test-user-id",
-					DisplayName: "Test Session",
-					DeviceInfo:  "Test Device",
-					CreatedAt:   time.Now(),
-					ExpiresAt:   time.Now().Add(24 * time.Hour),
-					IsActive:    true,
-				}
-				err := sessionRepo.CreateSession(session)
-				if err != nil {
-					t.Fatalf("Failed to create test session: %v", err)
-				}
-				return session.SessionID
-			},
-			expectedCode: http.StatusOK,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var response utils.Response
-				err := json.Unmarshal(w.Body.Bytes(), &response)
-				if err != nil {
-					t.Fatalf("Failed to parse response: %v", err)
-				}
+		data, ok := response.Data.(map[string]interface{})
+		if !ok {
+			t.Fatal("Response data is not in expected format")
+		}
 
-				data, ok := response.Data.(map[string]interface{})
-				if !ok {
-					t.Fatal("Response missing data object")
-				}
+		sessions, ok := data["sessions"].([]interface{})
+		if !ok {
+			t.Fatal("Sessions data is not in expected format")
+		}
 
-				msg, ok := data["message"].(string)
-				if !ok || msg != "Successfully logged out of the session" {
-					t.Errorf("Expected success message, got %v", msg)
-				}
-			},
-		},
-		// Add more test cases for other session handlers
-	}
+		if len(sessions) != 1 {
+			t.Errorf("Expected 1 session, got %d", len(sessions))
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Clear sessions collection before each test
-			if err := client.Database("tonotes_test").Collection("sessions").Drop(context.Background()); err != nil {
-				t.Fatalf("Failed to clear sessions collection: %v", err)
+	t.Run("LogoutAllSessions", func(t *testing.T) {
+		// Setup
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+
+		// Create multiple test sessions
+		for i := 0; i < 3; i++ {
+			testSession := &model.Session{
+				SessionID:   uuid.New().String(),
+				UserID:      "test-user",
+				DisplayName: "Test Session",
+				DeviceInfo:  "Test Device",
+				IsActive:    true,
 			}
-
-			sessionID := ""
-			if tt.setupData != nil {
-				sessionID = tt.setupData(t)
+			if err := sessionRepo.CreateSession(testSession); err != nil {
+				t.Fatalf("Failed to create test session: %v", err)
 			}
+		}
 
-			router := gin.New()
-			router.Use(func(c *gin.Context) {
-				c.Set("user_id", tt.userID)
-				if sessionID != "" {
-					c.Set("session_id", sessionID)
-				}
-			})
+		// Set user context
+		c.Set("user_id", "test-user")
 
-			// Register routes based on test case
-			switch tt.endpoint {
-			case "/sessions":
-				router.GET("/sessions", func(c *gin.Context) {
-					handler.GetActiveSessions(c, sessionRepo)
-				})
-			case "/sessions/logout-all":
-				router.POST("/sessions/logout-all", func(c *gin.Context) {
-					handler.LogoutAllSessions(c, sessionRepo)
-				})
-			case "/sessions/{session_id}/logout":
-				router.POST("/sessions/:session_id/logout", func(c *gin.Context) {
-					handler.LogoutSession(c, sessionRepo)
-				})
+		// Test
+		handler.LogoutAllSessions(c, sessionRepo)
+
+		// Assertions
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
+		}
+
+		// Verify all sessions are ended
+		sessions, err := sessionRepo.GetUserActiveSessions("test-user")
+		if err != nil {
+			t.Fatalf("Failed to get active sessions: %v", err)
+		}
+		if len(sessions) != 0 {
+			t.Errorf("Expected 0 active sessions, got %d", len(sessions))
+		}
+	})
+
+	t.Run("LogoutSession", func(t *testing.T) {
+		// Setup
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+
+		// Create test session
+		testSession := &model.Session{
+			SessionID:   uuid.New().String(),
+			UserID:      "test-user",
+			DisplayName: "Test Session",
+			DeviceInfo:  "Test Device",
+			IsActive:    true,
+		}
+		if err := sessionRepo.CreateSession(testSession); err != nil {
+			t.Fatalf("Failed to create test session: %v", err)
+		}
+
+		// Set user context and params
+		c.Set("user_id", "test-user")
+		c.Params = append(c.Params, gin.Param{Key: "session_id", Value: testSession.SessionID})
+
+		// Test
+		handler.LogoutSession(c, sessionRepo)
+
+		// Assertions
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
+		}
+
+		// Verify session is deleted
+		session, err := sessionRepo.GetSession(testSession.SessionID)
+		if err != nil {
+			t.Fatalf("Failed to get session: %v", err)
+		}
+		if session != nil {
+			t.Error("Session should have been deleted")
+		}
+	})
+
+	t.Run("CreateSession", func(t *testing.T) {
+		// Setup
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+
+		// Mock request context
+		c.Request = httptest.NewRequest("POST", "/", nil)
+		c.Request.Header.Set("User-Agent", "Mozilla/5.0 (Test)")
+
+		// Test
+		err := handler.CreateSession(c, "test-user", sessionRepo)
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		// Get cookie
+		cookies := w.Result().Cookies()
+		var sessionCookie *http.Cookie
+		for _, cookie := range cookies {
+			if cookie.Name == "session_id" {
+				sessionCookie = cookie
+				break
 			}
+		}
 
-			// Create request
-			req := httptest.NewRequest(tt.method, strings.Replace(tt.endpoint, "{session_id}", sessionID, 1), nil)
-			w := httptest.NewRecorder()
+		// Assertions
+		if sessionCookie == nil {
+			t.Error("Session cookie not found")
+		}
 
-			router.ServeHTTP(w, req)
+		// Verify session was created
+		session, err := sessionRepo.GetSession(sessionCookie.Value)
+		if err != nil {
+			t.Fatalf("Failed to get session: %v", err)
+		}
+		if session == nil {
+			t.Error("Session not found in database")
+		}
+		if session.UserID != "test-user" {
+			t.Errorf("Expected user ID %s, got %s", "test-user", session.UserID)
+		}
+	})
 
-			if w.Code != tt.expectedCode {
-				t.Errorf("Expected status code %d, got %d", tt.expectedCode, w.Code)
-			}
+	t.Run("GetSessionDetails", func(t *testing.T) {
+		// Setup
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
 
-			tt.checkResponse(t, w)
-		})
-	}
+		// Create test session
+		testSession := &model.Session{
+			SessionID:   uuid.New().String(),
+			UserID:      "test-user",
+			DisplayName: "Test Session",
+			DeviceInfo:  "Test Device",
+			IsActive:    true,
+		}
+		if err := sessionRepo.CreateSession(testSession); err != nil {
+			t.Fatalf("Failed to create test session: %v", err)
+		}
+
+		// Set user context and params
+		c.Set("user_id", "test-user")
+		c.Params = append(c.Params, gin.Param{Key: "session_id", Value: testSession.SessionID})
+
+		// Test
+		handler.GetSessionDetails(c, sessionRepo)
+
+		// Assertions
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
+		}
+
+		var response utils.Response
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("Failed to parse response: %v", err)
+		}
+
+		data, ok := response.Data.(map[string]interface{})
+		if !ok {
+			t.Fatal("Response data is not in expected format")
+		}
+		if data["session"] == nil {
+			t.Error("Session details not found in response")
+		}
+	})
 }

@@ -4,14 +4,46 @@ import (
 	"context"
 	"main/model"
 	"main/repository"
+	"main/test/testutils"
 	"main/utils"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+func setupSessionTest(t *testing.T) (*mongo.Client, *repository.SessionRepo, func()) {
+	// Use testutils for environment and database setup
+	testutils.SetupTestEnvironment()
+	client, cleanup := testutils.SetupTestDB(t)
+
+	// Get database reference using environment variable
+	db := client.Database(os.Getenv("MONGO_DB"))
+
+	// Create sessions collection explicitly
+	err := db.CreateCollection(context.Background(), "sessions")
+	if err != nil && !strings.Contains(err.Error(), "NamespaceExists") {
+		t.Fatalf("Failed to create sessions collection: %v", err)
+	}
+
+	// Initialize repository with correct database reference
+	sessionRepo := repository.GetSessionRepo(client)
+	sessionRepo.MongoCollection = db.Collection("sessions")
+
+	// Return cleanup function that properly handles disconnection
+	combinedCleanup := func() {
+		t.Log("Running cleanup")
+		if err := db.Collection("sessions").Drop(context.Background()); err != nil {
+			t.Logf("Warning: Failed to drop collection: %v", err)
+		}
+		cleanup()
+	}
+
+	return client, sessionRepo, combinedCleanup
+}
 
 func TestParseUserAgent(t *testing.T) {
 	tests := []struct {
@@ -159,13 +191,8 @@ func TestLocationParsing(t *testing.T) {
 }
 
 func TestSessionNaming(t *testing.T) {
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://localhost:27017"))
-	if err != nil {
-		t.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-	defer client.Disconnect(context.Background())
-
-	sessionRepo := repository.GetSessionRepo(client)
+	_, sessionRepo, cleanup := setupSessionTest(t)
+	defer cleanup()
 
 	tests := []struct {
 		name      string
@@ -203,6 +230,7 @@ func TestSessionNaming(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Logf("Running test case: %s", tt.name)
 			// Create session
 			session := &model.Session{
 				SessionID:  uuid.New().String(),
@@ -255,13 +283,8 @@ func TestSessionNaming(t *testing.T) {
 	}
 }
 func TestSessionDeletion(t *testing.T) {
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://localhost:27017"))
-	if err != nil {
-		t.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-	defer client.Disconnect(context.Background())
-
-	sessionRepo := repository.GetSessionRepo(client)
+	_, sessionRepo, cleanup := setupSessionTest(t)
+	defer cleanup()
 
 	tests := []struct {
 		name      string

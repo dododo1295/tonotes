@@ -9,55 +9,21 @@ import (
 
 	"main/model"
 	"main/repository"
+	"main/test/testutils"
 
 	"github.com/google/uuid"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
-func TestMain(m *testing.M) {
-	// Set up test environment variables
-	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
-	os.Setenv("JWT_SECRET_KEY", "test_secret_key")
-	os.Setenv("JWT_EXPIRATION_TIME", "3600")
-	os.Setenv("REFRESH_TOKEN_EXPIRATION_TIME", "604800")
-
-	// Run the tests
-	code := m.Run()
-
-	// Clean up
-	os.Exit(code)
-}
-
-func newMongoClient() *mongo.Client {
-	mongoTestClient, err := mongo.Connect(context.Background(),
-		options.Client().ApplyURI(os.Getenv("MONGO_URI")))
-	if err != nil {
-		log.Fatal("error while connecting to database", err)
-	}
-
-	log.Println("Successfully connected to Database")
-
-	err = mongoTestClient.Ping(context.Background(), readpref.Primary())
-	if err != nil {
-		log.Fatal("something went wrong...", err)
-	}
-
-	log.Println("Pinged MongoDB")
-
-	return mongoTestClient
-}
-
 func TestUserRepoOperations(t *testing.T) {
-	mongoTest := newMongoClient()
-	defer mongoTest.Disconnect(context.Background())
+	testutils.SetupTestEnvironment()
+	client, cleanup := testutils.SetupTestDB(t)
+	defer cleanup()
 
 	user1 := uuid.New().String()
 	user2 := uuid.New().String()
 
-	coll := mongoTest.Database("tonotes").Collection("testUsers")
-
+	// Use environment variables for database and collection names
+	coll := client.Database(os.Getenv("MONGO_DB")).Collection(os.Getenv("USERS_COLLECTION"))
 	userRepo := repository.UsersRepo{MongoCollection: coll}
 
 	// Adding Users!

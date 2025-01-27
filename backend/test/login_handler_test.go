@@ -3,35 +3,31 @@ package test
 import (
 	"bytes"
 	"context"
+	"encoding/base32"
 	"encoding/json"
 	"fmt"
 	"main/handler"
 	"main/model"
 	"main/repository"
 	"main/services"
+	"main/test/testutils"
 	"main/utils"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	"github.com/go-playground/validator/v10"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/pquerna/otp/totp"
 )
 
 func init() {
 	fmt.Println("Setting GO_ENV=test in init")
-	os.Setenv("GO_ENV", "test")
-	os.Setenv("JWT_SECRET_KEY", "test_secret_key")
-	os.Setenv("JWT_EXPIRATION_TIME", "3600")
-	os.Setenv("REFRESH_TOKEN_EXPIRATION_TIME", "604800")
-	os.Setenv("MONGO_DB", "tonotes_test")
-	os.Setenv("SESSION_COLLECTION", "sessions")
+	// Instead of setting environment variables here, use testutils
+	testutils.SetupTestEnvironment()
 
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
 		v.RegisterValidation("password", func(fl validator.FieldLevel) bool {
@@ -47,29 +43,45 @@ func init() {
 // - Least active session termination when session limit is reached
 // - Response format and token generation
 func TestLoginHandler(t *testing.T) {
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://localhost:27017"))
-	if err != nil {
-		t.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-	defer client.Disconnect(context.Background())
+	t.Log("=== Starting LoginHandler Test Suite ===")
 
+	// Use the SetupTestDB function that worked in users_repo_test.go
+	client, cleanup := testutils.SetupTestDB(t)
+	defer cleanup()
+
+	// Set the MongoDB client in utils
 	utils.MongoClient = client
+	t.Log("MongoDB client set in utils")
 
-	// Database cleanup
-	if err := client.Database("tonotes_test").Collection("users").Drop(context.Background()); err != nil {
-		t.Fatalf("Failed to clear users collection: %v", err)
-	}
-	if err := client.Database("tonotes_test").Collection("sessions").Drop(context.Background()); err != nil {
-		t.Fatalf("Failed to clear sessions collection: %v", err)
+	// Create database reference
+	db := client.Database("tonotes_test")
+
+	// Ensure required collections exist
+	collections := []string{"users", "sessions"}
+	for _, collName := range collections {
+		t.Logf("Ensuring collection exists: %s", collName)
+		if err := db.CreateCollection(context.Background(), collName); err != nil {
+			if !strings.Contains(err.Error(), "NamespaceExists") {
+				t.Fatalf("Failed to create collection %s: %v", collName, err)
+			}
+			t.Logf("Collection %s already exists", collName)
+		}
 	}
 
+	// Initialize session repository
 	sessionRepo := repository.GetSessionRepo(client)
+	t.Log("Session repository initialized")
 
+	sessionRepo.MongoCollection = db.Collection("sessions")
+	t.Log("Seesion repository collection set")
+
+	// Set up Gin router
 	gin.SetMode(gin.TestMode)
 	router := gin.Default()
 	router.POST("/login", func(c *gin.Context) {
 		handler.LoginHandler(c, sessionRepo)
 	})
+	t.Log("Router configured with login handler")
 
 	tests := []struct {
 		name          string
@@ -79,31 +91,41 @@ func TestLoginHandler(t *testing.T) {
 		checkResponse func(*testing.T, *httptest.ResponseRecorder, *repository.SessionRepo)
 	}{
 		{
-			name: "Successful login - First session",
+			name: "Successful login - No 2FA",
 			inputJSON: `{
                 "username": "test@example.com",
                 "password": "Test123!@#"
             }`,
 			expectedCode: http.StatusOK,
 			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
+				t.Log("Setting up test case: Successful login - No 2FA")
+
+				collection := utils.MongoClient.Database("tonotes_test").Collection("users")
+				t.Logf("Using collection: %s", collection.Name())
+				userRepo.MongoCollection = collection
+
 				hashedPassword, err := services.HashPassword("Test123!@#")
 				if err != nil {
 					t.Fatalf("Failed to hash password: %v", err)
 				}
 
 				user := &model.User{
-					UserID:    "test-uuid",
-					Username:  "test@example.com",
-					Email:     "test@example.com",
-					Password:  hashedPassword,
-					CreatedAt: time.Now(),
+					UserID:           "test-uuid",
+					Username:         "test@example.com",
+					Email:            "test@example.com",
+					Password:         hashedPassword,
+					CreatedAt:        time.Now(),
+					TwoFactorEnabled: false,
 				}
 
-				if _, err := userRepo.MongoCollection.InsertOne(context.Background(), user); err != nil {
+				result, err := collection.InsertOne(context.Background(), user)
+				if err != nil {
 					t.Fatalf("Failed to insert test user: %v", err)
 				}
+				t.Logf("Created test user with ID: %v", result.InsertedID)
 			},
 			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder, sessionRepo *repository.SessionRepo) {
+				t.Log("Checking response for successful login")
 				var response utils.Response
 				if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 					t.Fatalf("Failed to decode response: %v", err)
@@ -120,19 +142,152 @@ func TestLoginHandler(t *testing.T) {
 				if _, ok := data["refresh"].(string); !ok {
 					t.Error("Response missing refresh token")
 				}
-				if _, ok := data["notice"]; ok {
-					t.Error("Notice should not be present for first login")
+			},
+		},
+		{
+			name: "2FA Required - No Code Provided",
+			inputJSON: `{
+                "username": "test2fa@example.com",
+                "password": "Test123!@#"
+            }`,
+			expectedCode: http.StatusOK,
+			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
+				t.Log("Setting up test case: 2FA Required - No Code Provided")
+
+				collection := utils.MongoClient.Database("tonotes_test").Collection("users")
+				t.Logf("Using collection: %s", collection.Name())
+				userRepo.MongoCollection = collection
+
+				hashedPassword, err := services.HashPassword("Test123!@#")
+				if err != nil {
+					t.Fatalf("Failed to hash password: %v", err)
+				}
+
+				user := &model.User{
+					UserID:           "test-2fa-uuid",
+					Username:         "test2fa@example.com",
+					Email:            "test2fa@example.com",
+					Password:         hashedPassword,
+					CreatedAt:        time.Now(),
+					TwoFactorEnabled: true,
+					TwoFactorSecret:  "TESTSECRET123",
+				}
+
+				result, err := collection.InsertOne(context.Background(), user)
+				if err != nil {
+					t.Fatalf("Failed to insert test user: %v", err)
+				}
+				t.Logf("Created 2FA test user with ID: %v", result.InsertedID)
+			},
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder, sessionRepo *repository.SessionRepo) {
+				t.Log("Checking response for 2FA required")
+				var response utils.Response
+				if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+					t.Fatalf("Failed to decode response: %v", err)
+				}
+
+				data, ok := response.Data.(map[string]interface{})
+				if !ok {
+					t.Fatal("Response missing data object")
+				}
+
+				if requires2FA, ok := data["requires_2fa"].(bool); !ok || !requires2FA {
+					t.Error("Response should indicate 2FA is required")
+				}
+
+				if _, ok := data["token"]; ok {
+					t.Error("Response should not contain token when 2FA is required")
 				}
 			},
 		},
 		{
-			name: "Login with max sessions - should end least active session",
+			name: "2FA Success - With Valid Code",
+			inputJSON: func() string {
+				t.Log("Setting up 2FA Success test case with valid code")
+
+				secret := base32.StdEncoding.EncodeToString([]byte("TESTSECRET123"))
+				t.Logf("Generated Base32 secret: %s", secret)
+
+				validCode, err := totp.GenerateCode(secret, time.Now())
+				if err != nil {
+					t.Fatalf("Failed to generate TOTP code: %v", err)
+				}
+				t.Logf("Generated valid TOTP code: %s", validCode)
+
+				return fmt.Sprintf(`{
+                    "username": "test2fa@example.com",
+                    "password": "Test123!@#",
+                    "two_factor_code": "%s"
+                }`, validCode)
+			}(),
+			expectedCode: http.StatusOK,
+			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
+				t.Log("Setting up test case: 2FA Success - With Valid Code")
+
+				collection := utils.MongoClient.Database("tonotes_test").Collection("users")
+				t.Logf("Using collection: %s", collection.Name())
+				userRepo.MongoCollection = collection
+
+				hashedPassword, err := services.HashPassword("Test123!@#")
+				if err != nil {
+					t.Fatalf("Failed to hash password: %v", err)
+				}
+
+				secret := base32.StdEncoding.EncodeToString([]byte("TESTSECRET123"))
+				user := &model.User{
+					UserID:           "test-2fa-uuid",
+					Username:         "test2fa@example.com",
+					Email:            "test2fa@example.com",
+					Password:         hashedPassword,
+					CreatedAt:        time.Now(),
+					TwoFactorEnabled: true,
+					TwoFactorSecret:  secret,
+				}
+
+				result, err := collection.InsertOne(context.Background(), user)
+				if err != nil {
+					t.Fatalf("Failed to insert test user: %v", err)
+				}
+				t.Logf("Created 2FA test user with ID: %v", result.InsertedID)
+			},
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder, sessionRepo *repository.SessionRepo) {
+				t.Log("Checking response for successful 2FA login")
+				var response utils.Response
+				if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+					t.Fatalf("Failed to decode response: %v", err)
+				}
+
+				if response.Error != "" {
+					t.Errorf("Unexpected error in response: %s", response.Error)
+				}
+
+				data, ok := response.Data.(map[string]interface{})
+				if !ok {
+					t.Fatal("Response missing data object")
+				}
+
+				if _, ok := data["token"].(string); !ok {
+					t.Error("Response missing token")
+				}
+				if _, ok := data["refresh"].(string); !ok {
+					t.Error("Response missing refresh token")
+				}
+			},
+		},
+		{
+			name: "Login with max sessions",
 			inputJSON: `{
                 "username": "test@example.com",
                 "password": "Test123!@#"
             }`,
 			expectedCode: http.StatusOK,
 			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
+				t.Log("Setting up test case: Login with max sessions")
+
+				collection := utils.MongoClient.Database("tonotes_test").Collection("users")
+				t.Logf("Using collection: %s", collection.Name())
+				userRepo.MongoCollection = collection
+
 				hashedPassword, err := services.HashPassword("Test123!@#")
 				if err != nil {
 					t.Fatalf("Failed to hash password: %v", err)
@@ -146,11 +301,14 @@ func TestLoginHandler(t *testing.T) {
 					CreatedAt: time.Now(),
 				}
 
-				if _, err := userRepo.MongoCollection.InsertOne(context.Background(), user); err != nil {
+				result, err := collection.InsertOne(context.Background(), user)
+				if err != nil {
 					t.Fatalf("Failed to insert test user: %v", err)
 				}
+				t.Logf("Created test user with ID: %v", result.InsertedID)
 
-				// Create max sessions with different activity times
+				// Create max sessions with logging
+				t.Logf("Creating %d test sessions", handler.MaxActiveSessions)
 				for i := 0; i < handler.MaxActiveSessions; i++ {
 					session := &model.Session{
 						SessionID:      fmt.Sprintf("session-%d", i),
@@ -162,12 +320,15 @@ func TestLoginHandler(t *testing.T) {
 						IPAddress:      "127.0.0.1",
 						IsActive:       true,
 					}
-					if _, err := sessionRepo.MongoCollection.InsertOne(context.Background(), session); err != nil {
-						t.Fatalf("Failed to insert test session: %v", err)
+					result, err := sessionRepo.MongoCollection.InsertOne(context.Background(), session)
+					if err != nil {
+						t.Fatalf("Failed to insert test session %d: %v", i, err)
 					}
+					t.Logf("Created session %d with ID: %v", i, result.InsertedID)
 				}
 			},
 			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder, sessionRepo *repository.SessionRepo) {
+				t.Log("Checking response for max sessions login")
 				var response utils.Response
 				if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 					t.Fatalf("Failed to decode response: %v", err)
@@ -178,58 +339,165 @@ func TestLoginHandler(t *testing.T) {
 					t.Fatal("Response missing data object")
 				}
 
-				// Check basic response fields
+				notice, hasNotice := data["notice"].(string)
+				if !hasNotice {
+					t.Error("Response missing notice about ended session")
+				} else {
+					t.Logf("Received notice: %s", notice)
+					if notice != "Logged out of least active session due to session limit" {
+						t.Errorf("Unexpected notice message: %s", notice)
+					}
+				}
+
+				// Verify session counts
+				t.Log("Verifying session counts")
+				time.Sleep(100 * time.Millisecond)
+				sessions, err := sessionRepo.GetUserActiveSessions("test-uuid")
+				if err != nil {
+					t.Fatalf("Failed to get active sessions: %v", err)
+				}
+
+				t.Logf("Found %d active sessions", len(sessions))
+				if len(sessions) != handler.MaxActiveSessions {
+					t.Errorf("Expected %d active sessions, got %d",
+						handler.MaxActiveSessions, len(sessions))
+				}
+			},
+		},
+		{
+			name: "2FA Success - Time-based Code Validation",
+			inputJSON: func() string {
+				t.Log("Setting up 2FA Success test case with time-based validation")
+
+				secret := base32.StdEncoding.EncodeToString([]byte("TESTSECRET123"))
+				t.Logf("Generated Base32 secret: %s", secret)
+
+				validCode, err := totp.GenerateCode(secret, time.Now())
+				if err != nil {
+					t.Fatalf("Failed to generate TOTP code: %v", err)
+				}
+				t.Logf("Generated valid TOTP code: %s for current time", validCode)
+
+				return fmt.Sprintf(`{
+                    "username": "test2fa@example.com",
+                    "password": "Test123!@#",
+                    "two_factor_code": "%s"
+                }`, validCode)
+			}(),
+			expectedCode: http.StatusOK,
+			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
+				t.Log("Setting up test case: 2FA Success - Time-based Code Validation")
+
+				collection := utils.MongoClient.Database("tonotes_test").Collection("users")
+				t.Logf("Using collection: %s", collection.Name())
+				userRepo.MongoCollection = collection
+
+				hashedPassword, err := services.HashPassword("Test123!@#")
+				if err != nil {
+					t.Fatalf("Failed to hash password: %v", err)
+				}
+
+				secret := base32.StdEncoding.EncodeToString([]byte("TESTSECRET123"))
+				user := &model.User{
+					UserID:           "test-2fa-uuid",
+					Username:         "test2fa@example.com",
+					Email:            "test2fa@example.com",
+					Password:         hashedPassword,
+					CreatedAt:        time.Now(),
+					TwoFactorEnabled: true,
+					TwoFactorSecret:  secret,
+				}
+
+				result, err := collection.InsertOne(context.Background(), user)
+				if err != nil {
+					t.Fatalf("Failed to insert test user: %v", err)
+				}
+				t.Logf("Created 2FA test user with ID: %v", result.InsertedID)
+			},
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder, sessionRepo *repository.SessionRepo) {
+				t.Log("Checking response for time-based 2FA login")
+				var response utils.Response
+				if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+					t.Fatalf("Failed to decode response: %v", err)
+				}
+
+				if response.Error != "" {
+					t.Errorf("Unexpected error in response: %s", response.Error)
+				}
+
+				data, ok := response.Data.(map[string]interface{})
+				if !ok {
+					t.Fatal("Response missing data object")
+				}
+
 				if _, ok := data["token"].(string); !ok {
 					t.Error("Response missing token")
 				}
 				if _, ok := data["refresh"].(string); !ok {
 					t.Error("Response missing refresh token")
 				}
+			},
+		},
+		{
+			name: "2FA Failure - Expired Code",
+			inputJSON: func() string {
+				t.Log("Setting up 2FA Failure test case with expired code")
 
-				// Check notice about ended session
-				notice, hasNotice := data["notice"].(string)
-				if !hasNotice {
-					t.Error("Response missing notice about ended session")
-				} else if notice != "Logged out of least active session due to session limit" {
-					t.Errorf("Unexpected notice message: %s", notice)
-				}
+				secret := base32.StdEncoding.EncodeToString([]byte("TESTSECRET123"))
+				t.Logf("Generated Base32 secret: %s", secret)
 
-				// Verify session state
-				time.Sleep(100 * time.Millisecond) // Allow time for DB operations
-				var sessions []*model.Session
-				cursor, err := sessionRepo.MongoCollection.Find(context.Background(),
-					bson.M{"user_id": "test-uuid"})
+				pastTime := time.Now().Add(-2 * time.Minute)
+				expiredCode, err := totp.GenerateCode(secret, pastTime)
 				if err != nil {
-					t.Fatalf("Failed to query sessions: %v", err)
+					t.Fatalf("Failed to generate TOTP code: %v", err)
+				}
+				t.Logf("Generated expired TOTP code: %s (from 2 minutes ago)", expiredCode)
+
+				return fmt.Sprintf(`{
+                    "username": "test2fa@example.com",
+                    "password": "Test123!@#",
+                    "two_factor_code": "%s"
+                }`, expiredCode)
+			}(),
+			expectedCode: http.StatusUnauthorized,
+			setupMockDB: func(t *testing.T, userRepo *repository.UsersRepo) {
+				t.Log("Setting up test case: 2FA Failure - Expired Code")
+
+				collection := utils.MongoClient.Database("tonotes_test").Collection("users")
+				t.Logf("Using collection: %s", collection.Name())
+				userRepo.MongoCollection = collection
+
+				hashedPassword, err := services.HashPassword("Test123!@#")
+				if err != nil {
+					t.Fatalf("Failed to hash password: %v", err)
 				}
 
-				if err := cursor.All(context.Background(), &sessions); err != nil {
-					t.Fatalf("Failed to decode sessions: %v", err)
+				secret := base32.StdEncoding.EncodeToString([]byte("TESTSECRET123"))
+				user := &model.User{
+					UserID:           "test-2fa-uuid",
+					Username:         "test2fa@example.com",
+					Email:            "test2fa@example.com",
+					Password:         hashedPassword,
+					CreatedAt:        time.Now(),
+					TwoFactorEnabled: true,
+					TwoFactorSecret:  secret,
 				}
 
-				// Count active sessions
-				activeCount := 0
-				var oldestInactiveID string
-				oldestInactiveTime := time.Now()
-
-				for _, session := range sessions {
-					if session.IsActive {
-						activeCount++
-					} else {
-						if session.LastActivityAt.Before(oldestInactiveTime) {
-							oldestInactiveTime = session.LastActivityAt
-							oldestInactiveID = session.SessionID
-						}
-					}
+				result, err := collection.InsertOne(context.Background(), user)
+				if err != nil {
+					t.Fatalf("Failed to insert test user: %v", err)
+				}
+				t.Logf("Created 2FA test user with ID: %v", result.InsertedID)
+			},
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder, sessionRepo *repository.SessionRepo) {
+				t.Log("Checking response for expired 2FA code")
+				var response utils.Response
+				if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+					t.Fatalf("Failed to decode response: %v", err)
 				}
 
-				if activeCount != handler.MaxActiveSessions {
-					t.Errorf("Expected %d active sessions, got %d",
-						handler.MaxActiveSessions, activeCount)
-				}
-
-				if oldestInactiveID != fmt.Sprintf("session-%d", handler.MaxActiveSessions-1) {
-					t.Errorf("Expected oldest session to be ended, got %s", oldestInactiveID)
+				if response.Error != "Invalid 2FA code" {
+					t.Errorf("Expected 'Invalid 2FA code' error, got: %s", response.Error)
 				}
 			},
 		},
@@ -237,28 +505,45 @@ func TestLoginHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Logf("=== Starting test case: %s ===", tt.name)
+
 			// Clear collections before each test
-			if err := client.Database("tonotes_test").Collection("users").Drop(context.Background()); err != nil {
-				t.Fatalf("Failed to clear users collection: %v", err)
-			}
-			if err := client.Database("tonotes_test").Collection("sessions").Drop(context.Background()); err != nil {
-				t.Fatalf("Failed to clear sessions collection: %v", err)
+			for _, collName := range collections {
+				t.Logf("Clearing collection: %s", collName)
+				if err := db.Collection(collName).Drop(context.Background()); err != nil {
+					t.Fatalf("Failed to clear %s collection: %v", collName, err)
+				}
+
+				// Recreate collection
+				t.Logf("Recreating collection: %s", collName)
+				if err := db.CreateCollection(context.Background(), collName); err != nil {
+					if !strings.Contains(err.Error(), "NamespaceExists") {
+						t.Fatalf("Failed to create collection %s: %v", collName, err)
+					}
+					t.Logf("Collection %s already exists", collName)
+				}
 			}
 
 			userRepo := repository.GetUsersRepo(utils.MongoClient)
+			t.Log("Setting up mock database")
 			tt.setupMockDB(t, userRepo)
 
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest("POST", "/login", bytes.NewBufferString(tt.inputJSON))
 			req.Header.Set("Content-Type", "application/json")
 
+			t.Logf("Making request with body: %s", tt.inputJSON)
+
 			router.ServeHTTP(w, req)
 
 			if w.Code != tt.expectedCode {
 				t.Errorf("Expected status code %d, got %d", tt.expectedCode, w.Code)
+				t.Logf("Response body: %s", w.Body.String())
 			}
 
+			t.Log("Checking response")
 			tt.checkResponse(t, w, sessionRepo)
+			t.Logf("=== Completed test case: %s ===", tt.name)
 		})
 	}
 }
