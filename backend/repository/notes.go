@@ -21,6 +21,18 @@ type NotesRepo struct {
 	MongoCollection *mongo.Collection
 }
 
+func GetNotesRepo(client *mongo.Client) *NotesRepo {
+	dbName := os.Getenv("MONGO_DB")
+	collectionName := os.Getenv("NOTES_COLLECTION")
+
+	if os.Getenv("GO_ENV") == "test" {
+		dbName = "tonotes_test"
+	}
+	return &NotesRepo{
+		MongoCollection: client.Database(dbName).Collection(collectionName),
+	}
+}
+
 type NotesSearchOptions struct {
 	UserID      string
 	Query       string   // For text search
@@ -206,12 +218,6 @@ func (r *NotesRepo) CountNotesByTag(userID string) (map[string]int, error) {
 	}
 
 	return tagCounts, nil
-}
-
-func GetNotesRepo(client *mongo.Client) *NotesRepo {
-	return &NotesRepo{
-		MongoCollection: client.Database(os.Getenv("MONGO_DB")).Collection("notes"),
-	}
 }
 
 // CreateNote creates a new note

@@ -10,6 +10,7 @@ import (
 	"main/utils"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pquerna/otp/totp"
 )
 
 const MaxActiveSessions = 5
@@ -47,6 +48,26 @@ func LoginHandler(c *gin.Context, sessionRepo *repository.SessionRepo) {
 	if !checkPassword {
 		utils.Unauthorized(c, "Incorrect Password")
 		return
+	}
+
+	// Check if 2FA is enabled
+	if user.TwoFactorEnabled {
+		// If 2FA is enabled but no code provided
+		if loginReq.TwoFactorCode == "" {
+			utils.Success(c, gin.H{
+				"requires_2fa": true,
+				"message":      "2FA code required",
+				"user_id":      user.UserID, // Optionally include user ID for subsequent 2FA verification
+			})
+			return
+		}
+
+		// Verify 2FA code
+		valid := totp.Validate(loginReq.TwoFactorCode, user.TwoFactorSecret)
+		if !valid {
+			utils.Unauthorized(c, "Invalid 2FA code")
+			return
+		}
 	}
 
 	// Check active session count
@@ -91,6 +112,11 @@ func LoginHandler(c *gin.Context, sessionRepo *repository.SessionRepo) {
 		"message": "Login successful",
 		"token":   token,
 		"refresh": refreshToken,
+		"user": gin.H{
+			"id":       user.UserID,
+			"username": user.Username,
+			"email":    user.Email,
+		},
 	}
 
 	// Add notice if a session was ended

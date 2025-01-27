@@ -17,8 +17,10 @@ type TodosRepo struct {
 
 // Constructor function for TodosRepo
 func GetTodosRepo(client *mongo.Client) *TodosRepo {
+	dbName := os.Getenv("MONGO_DB")
+	collectionName := os.Getenv("TODOS_COLLECTION")
 	return &TodosRepo{
-		MongoCollection: client.Database(os.Getenv("MONGO_DB")).Collection("todos"),
+		MongoCollection: client.Database(dbName).Collection(collectionName),
 	}
 }
 

@@ -19,8 +19,8 @@ type SessionCache struct {
 
 type SessionCacheEntry struct {
 	Sessions  []*model.Session `json:"sessions"`
-	Version   int64           `json:"version"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	Version   int64            `json:"version"`
+	UpdatedAt time.Time        `json:"updated_at"`
 }
 
 var GlobalSessionCache *SessionCache
@@ -294,6 +294,15 @@ func (sc *SessionCache) StartCleanupTask() {
 			}
 		}
 	}()
+}
+
+func (sc *SessionCache) IsConnected() bool {
+	if sc == nil || sc.client == nil { // Changed from sc.Client to sc.client
+		return false
+	}
+	// Check if connection is alive
+	ctx := context.Background()
+	return sc.client.Ping(ctx).Err() == nil
 }
 
 // Close closes the Redis connection

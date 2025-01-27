@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -11,44 +12,16 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func SetupIndexes(db *mongo.Database) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Initialize collections
-	notesCollection := db.Collection("notes")
-	todosCollection := db.Collection("todos")
-
-	// Define indexes
-	noteIndexes := []mongo.IndexModel{
-		// Basic user-date index
+var (
+	// Notes indexes
+	noteIndexes = []mongo.IndexModel{
 		{
 			Keys: bson.D{
 				{Key: "user_id", Value: 1},
 				{Key: "created_at", Value: -1},
 			},
-			Options: options.Index().
-				SetName("user_notes_date").
-				SetUnique(false),
+			Options: options.Index().SetName("user_notes_date"),
 		},
-		// User ID index
-		{
-			Keys: bson.D{{Key: "user_id", Value: 1}},
-			Options: options.Index().
-				SetName("user_id_index"),
-		},
-		// Pinned notes index
-		{
-			Keys: bson.D{
-				{Key: "user_id", Value: 1},
-				{Key: "is_pinned", Value: 1},
-				{Key: "pinned_position", Value: 1},
-			},
-			Options: options.Index().
-				SetName("user_pinned_notes_order").
-				SetUnique(false),
-		},
-		// Text search index
 		{
 			Keys: bson.D{
 				{Key: "title", Value: "text"},
@@ -57,63 +30,148 @@ func SetupIndexes(db *mongo.Database) error {
 			},
 			Options: options.Index().
 				SetName("text_search").
-				SetDefaultLanguage("english").
 				SetWeights(bson.D{
 					{Key: "title", Value: 10},
 					{Key: "content", Value: 5},
 					{Key: "tags", Value: 3},
 				}),
 		},
-		// Tags index
 		{
 			Keys: bson.D{
 				{Key: "user_id", Value: 1},
-				{Key: "tags", Value: 1},
+				{Key: "is_pinned", Value: 1},
 			},
-			Options: options.Index().
-				SetName("user_tags"),
-		},
-		// Archive index
-		{
-			Keys: bson.D{
-				{Key: "user_id", Value: 1},
-				{Key: "is_archived", Value: 1},
-				{Key: "updated_at", Value: -1},
-			},
-			Options: options.Index().
-				SetName("user_archived_notes"),
+			Options: options.Index().SetName("user_pinned_notes"),
 		},
 	}
 
-	todosIndexes := []mongo.IndexModel{
+	// Todos indexes
+	todosIndexes = []mongo.IndexModel{
 		{
 			Keys: bson.D{
 				{Key: "user_id", Value: 1},
 				{Key: "created_at", Value: -1},
 			},
+			Options: options.Index().SetName("user_todos_date"),
+		},
+		{
+			Keys: bson.D{
+				{Key: "user_id", Value: 1},
+				{Key: "complete", Value: 1},
+			},
+			Options: options.Index().SetName("user_todos_status"),
+		},
+	}
+
+	// Users indexes
+	usersIndexes = []mongo.IndexModel{
+		{
+			Keys: bson.D{{Key: "username", Value: 1}},
 			Options: options.Index().
-				SetName("user_todos_date").
-				SetUnique(false),
+				SetName("username_index").
+				SetUnique(true),
 		},
 		{
 			Keys: bson.D{{Key: "user_id", Value: 1}},
 			Options: options.Index().
-				SetName("user_id_index"),
+				SetName("user_id_index").
+				SetUnique(true),
+		},
+		{
+			Keys: bson.D{{Key: "email", Value: 1}},
+			Options: options.Index().
+				SetName("email_index").
+				SetUnique(true),
 		},
 	}
 
-	// Create indexes for notes
-	_, err := notesCollection.Indexes().CreateMany(ctx, noteIndexes)
-	if err != nil {
-		return fmt.Errorf("failed to create notes indexes: %w", err)
+	// Sessions indexes
+	sessionsIndexes = []mongo.IndexModel{
+		{
+			Keys: bson.D{
+				{Key: "user_id", Value: 1},
+				{Key: "session_id", Value: 1},
+			},
+			Options: options.Index().SetName("user_session_index"),
+		},
+		{
+			Keys: bson.D{{Key: "expires_at", Value: 1}},
+			Options: options.Index().
+				SetName("session_expiry_index").
+				SetExpireAfterSeconds(0),
+		},
+		{
+			Keys: bson.D{
+				{Key: "user_id", Value: 1},
+				{Key: "is_active", Value: 1},
+			},
+			Options: options.Index().SetName("user_active_sessions"),
+		},
+	}
+)
+
+func SetupIndexes(db *mongo.Database) error {
+	if db == nil {
+		return fmt.Errorf("database instance is nil")
 	}
 
-	// Create indexes for todos
-	_, err = todosCollection.Indexes().CreateMany(ctx, todosIndexes)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dbName := db.Name()
+	log.Printf("Setting up indexes for database: %s", dbName)
+
+	// Verify database exists
+	dbs, err := db.Client().ListDatabaseNames(ctx, bson.D{})
 	if err != nil {
-		return fmt.Errorf("failed to create todos indexes: %w", err)
+		return fmt.Errorf("failed to list databases: %w", err)
+	}
+	log.Printf("Available databases: %v", dbs)
+
+	// Create collections first
+	for _, collName := range []string{"notes", "todos", "users", "sessions"} {
+		log.Printf("Ensuring collection exists: %s.%s", dbName, collName)
+		err := db.CreateCollection(ctx, collName)
+		if err != nil && !strings.Contains(err.Error(), "NamespaceExists") {
+			return fmt.Errorf("failed to create collection %s: %w", collName, err)
+		}
 	}
 
-	log.Println("Successfully created all indexes")
+	// List collections to verify
+	colls, err := db.ListCollectionNames(ctx, bson.D{})
+	if err != nil {
+		return fmt.Errorf("failed to list collections: %w", err)
+	}
+	log.Printf("Collections in %s: %v", dbName, colls)
+
+	// Get collection references
+	notesCollection := db.Collection("notes")
+	todosCollection := db.Collection("todos")
+	usersCollection := db.Collection("users")
+	sessionsCollection := db.Collection("sessions")
+
+	// Create indexes with error handling
+	if notesCollection != nil {
+		if _, err := notesCollection.Indexes().CreateMany(ctx, noteIndexes); err != nil {
+			return fmt.Errorf("failed to create notes indexes in %s: %w", dbName, err)
+		}
+	}
+	if todosCollection != nil {
+		if _, err := todosCollection.Indexes().CreateMany(ctx, todosIndexes); err != nil { // Changed from notesCollection
+			return fmt.Errorf("failed to create todos indexes in %s: %w", dbName, err)
+		}
+	}
+	if usersCollection != nil {
+		if _, err := usersCollection.Indexes().CreateMany(ctx, usersIndexes); err != nil { // Changed from notesCollection
+			return fmt.Errorf("failed to create users indexes in %s: %w", dbName, err)
+		}
+	}
+	if sessionsCollection != nil {
+		if _, err := sessionsCollection.Indexes().CreateMany(ctx, sessionsIndexes); err != nil { // Changed from notesCollection
+			return fmt.Errorf("failed to create sessions indexes in %s: %w", dbName, err)
+		}
+	}
+
+	log.Printf("Successfully created all indexes in database: %s", dbName)
 	return nil
 }

@@ -134,6 +134,16 @@ func (tb *RedisTokenBlacklist) isTokenBlacklisted(tokenString string) bool {
 	return accessCmd.Val() > 0 || refreshCmd.Val() > 0
 }
 
+// IsConnected checks if the Redis connection is alive
+func (tb *RedisTokenBlacklist) IsConnected() bool {
+	if tb == nil || tb.Client == nil {
+		return false
+	}
+	// Check if connection is alive
+	ctx := context.Background()
+	return tb.Client.Ping(ctx).Err() == nil
+}
+
 // Cleanup removes expired tokens (Redis handles this automatically, but this method can be used for manual cleanup)
 func (tb *RedisTokenBlacklist) Cleanup() error {
 	return nil // Redis automatically removes expired keys

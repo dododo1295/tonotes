@@ -145,3 +145,67 @@ func (r *UsersRepo) UpdateUserEmail(userID string, email string) (int64, error) 
 	}
 	return result.ModifiedCount, nil
 }
+
+func (r *UsersRepo) Enable2FAWithRecoveryCodes(userID, secret string, recoveryCodes []string) error {
+	filter := bson.M{"user_id": userID}
+	update := bson.M{
+		"$set": bson.M{
+			"two_factor_secret":  secret,
+			"two_factor_enabled": true,
+			"recovery_codes":     recoveryCodes,
+		},
+	}
+
+	result, err := r.MongoCollection.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return err
+	}
+
+	if result.MatchedCount == 0 {
+		return errors.New("user not found")
+	}
+
+	return nil
+}
+
+func (r *UsersRepo) UpdateRecoveryCodes(userID string, codes []string) error {
+	filter := bson.M{"user_id": userID}
+	update := bson.M{
+		"$set": bson.M{
+			"recovery_codes": codes,
+		},
+	}
+
+	result, err := r.MongoCollection.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return err
+	}
+
+	if result.MatchedCount == 0 {
+		return errors.New("user not found")
+	}
+
+	return nil
+}
+
+func (r *UsersRepo) Disable2FA(userID string) error {
+	filter := bson.M{"user_id": userID}
+	update := bson.M{
+		"$set": bson.M{
+			"two_factor_secret":  "",
+			"two_factor_enabled": false,
+			"recovery_codes":     nil,
+		},
+	}
+
+	result, err := r.MongoCollection.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return err
+	}
+
+	if result.MatchedCount == 0 {
+		return errors.New("user not found")
+	}
+
+	return nil
+}

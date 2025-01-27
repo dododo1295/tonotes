@@ -20,9 +20,12 @@ type SessionRepo struct {
 }
 
 func GetSessionRepo(client *mongo.Client) *SessionRepo {
+	dbName := os.Getenv("MONGO_DB")
+	collectionName := os.Getenv("SESSIONS_COLLECTION")
 	return &SessionRepo{
-		MongoCollection: client.Database(os.Getenv("MONGO_DB")).Collection("sessions"),
+		MongoCollection: client.Database(dbName).Collection(collectionName),
 	}
+
 }
 
 func (r *SessionRepo) CreateSession(session *model.Session) error {
