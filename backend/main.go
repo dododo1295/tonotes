@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -76,6 +77,22 @@ func verifyEnvironment(requiredVars []string) {
 	if len(missingVars) > 0 {
 		log.Fatalf("Missing required environment variables: %v", missingVars)
 	}
+}
+
+func collectSystemMetrics() {
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			// Update system metrics
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			middleware.SystemMemoryUsage.Set(float64(m.Alloc))
+			middleware.SystemCPUUsage.Set(utils.GetCPUUsage())
+			middleware.GoroutineCount.Set(float64(runtime.NumGoroutine()))
+		}
+	}()
 }
 
 func initializeServices() {
@@ -185,9 +202,14 @@ func setupRouter() *gin.Engine {
 		// Check MongoDB connection
 		if err := utils.CheckMongoConnection(); err != nil {
 			health["services"].(map[string]string)["mongodb"] = "down"
+			middleware.TrackDependencyHealth("mongodb", "connection", false)
 		} else {
 			health["services"].(map[string]string)["mongodb"] = "up"
+			middleware.TrackDependencyHealth("mongodb", "connection", true)
 		}
+
+		// Track API health
+		middleware.TrackAPIHealth("/health", true)
 
 		c.JSON(http.StatusOK, health)
 	})
@@ -305,6 +327,8 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
+	collectSystemMetrics()
+
 	// Start server
 	go func() {
 		log.Printf("Server starting on %s", srv.Addr)
@@ -351,8 +375,13 @@ func performGracefulShutdown(srv *http.Server) {
 }
 
 func cleanup(ctx context.Context) {
+	// Record start time for MTTR calculation
+	startTime := time.Now()
+
 	// Create WaitGroup for cleanup tasks
 	var wg sync.WaitGroup
+	errChan := make(chan error, 3) // Buffer for cleanup errors
+	done := make(chan struct{})
 
 	// Cleanup MongoDB
 	wg.Add(1)
@@ -360,41 +389,82 @@ func cleanup(ctx context.Context) {
 		defer wg.Done()
 		if err := utils.CloseMongoConnection(); err != nil {
 			log.Printf("Error disconnecting from MongoDB: %v", err)
+			errChan <- err
+			middleware.TrackDependencyHealth("mongodb", "cleanup", false)
+			middleware.TrackError("cleanup", "mongodb_disconnect")
+		} else {
+			middleware.TrackDependencyHealth("mongodb", "cleanup", true)
 		}
 	}()
 
-	// Cleanup Redis services
+	// Cleanup Redis Token Blacklist
 	if services.TokenBlacklist != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if err := services.TokenBlacklist.Close(); err != nil {
 				log.Printf("Error closing token blacklist: %v", err)
+				errChan <- err
+				middleware.TrackDependencyHealth("redis", "blacklist_cleanup", false)
+				middleware.TrackError("cleanup", "redis_blacklist")
+			} else {
+				middleware.TrackDependencyHealth("redis", "blacklist_cleanup", true)
 			}
 		}()
 	}
 
+	// Cleanup Redis Session Cache
 	if services.GlobalSessionCache != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if err := services.GlobalSessionCache.Close(); err != nil {
 				log.Printf("Error closing session cache: %v", err)
+				errChan <- err
+				middleware.TrackDependencyHealth("redis", "session_cache_cleanup", false)
+				middleware.TrackError("cleanup", "redis_session_cache")
+			} else {
+				middleware.TrackDependencyHealth("redis", "session_cache_cleanup", true)
 			}
 		}()
 	}
 
-	// Wait for all cleanup tasks with timeout
-	done := make(chan struct{})
+	// Wait for all cleanup tasks and collect errors
+	var cleanupErrors []error
 	go func() {
 		wg.Wait()
+		close(errChan)
 		close(done)
 	}()
 
+	// Handle cleanup completion or timeout
 	select {
 	case <-done:
-		log.Println("Cleanup completed successfully")
+		// Collect any errors that occurred during cleanup
+		for err := range errChan {
+			if err != nil {
+				cleanupErrors = append(cleanupErrors, err)
+			}
+		}
+
+		if len(cleanupErrors) == 0 {
+			log.Println("Cleanup completed successfully")
+			middleware.UpdateMTTR(time.Since(startTime).Minutes())
+			middleware.TrackDependencyHealth("application", "shutdown", true)
+		} else {
+			log.Printf("Cleanup completed with %d errors", len(cleanupErrors))
+			for _, err := range cleanupErrors {
+				log.Printf("Cleanup error: %v", err)
+				middleware.TrackError("cleanup", "failed")
+			}
+			middleware.UpdateMTTR(time.Since(startTime).Minutes())
+			middleware.TrackDependencyHealth("application", "shutdown", false)
+		}
+
 	case <-ctx.Done():
 		log.Println("Cleanup timed out")
+		middleware.TrackError("cleanup", "timeout")
+		middleware.UpdateMTTR(time.Since(startTime).Minutes())
+		middleware.TrackDependencyHealth("application", "shutdown", false)
 	}
 }
