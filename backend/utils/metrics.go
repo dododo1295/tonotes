@@ -1,4 +1,4 @@
-package middleware
+package utils
 
 import (
 	"fmt"
@@ -233,8 +233,8 @@ var (
 	)
 )
 
-// MetricsMiddleware handles metrics collection
-func MetricsMiddleware() gin.HandlerFunc {
+// MetricsUtil handles metrics collection
+func MetricsUtil() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
