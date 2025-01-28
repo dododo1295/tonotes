@@ -51,7 +51,7 @@ func setupTestRouter() *gin.Engine {
 	router.Use(
 		gin.Recovery(),
 		middleware.RequestTracingMiddleware(),
-		middleware.MetricsMiddleware(),
+		utils.MetricsUtil(),
 		middleware.RequestSizeLimiter(10<<20), // 10MB limit
 	)
 

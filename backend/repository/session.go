@@ -6,6 +6,7 @@ import (
 	"log"
 	"main/model"
 	"main/services"
+	"main/utils"
 	"os"
 	"sort"
 	"time"
@@ -29,37 +30,42 @@ func GetSessionRepo(client *mongo.Client) *SessionRepo {
 }
 
 func (r *SessionRepo) CreateSession(session *model.Session) error {
+	timer := utils.TrackDBOperation("insert", "sessions")
+	defer timer.ObserveDuration()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if session == nil {
+		utils.TrackError("database", "nil_session")
 		return fmt.Errorf("session cannot be nil")
 	}
 
-	// Validate session data
 	if session.SessionID == "" || session.UserID == "" {
+		utils.TrackError("database", "invalid_session_data")
 		return fmt.Errorf("invalid session data: missing required fields")
 	}
 
-	// First create in database
 	result, err := r.MongoCollection.InsertOne(ctx, session)
 	if err != nil {
+		utils.TrackError("database", "session_creation_failed")
 		return fmt.Errorf("failed to create session in database: %w", err)
 	}
 
-	// Verify the insertion
 	if result == nil {
+		utils.TrackError("database", "session_creation_no_result")
 		return fmt.Errorf("failed to create session: no result returned")
 	}
 
-	// Cache the new session if caching is enabled
 	if services.GlobalSessionCache != nil {
 		if err := services.GlobalSessionCache.SetSession(session); err != nil {
+			utils.TrackError("cache", "session_cache_set_failed")
 			log.Printf("Warning: Failed to cache session: %v", err)
 		}
+		utils.TrackCacheOperation("session", true)
 
-		// Invalidate user's sessions cache
 		if err := services.GlobalSessionCache.IncrementSessionVersion(session.UserID); err != nil {
+			utils.TrackError("cache", "session_version_increment_failed")
 			log.Printf("Warning: Failed to increment session version: %v", err)
 		}
 	}
@@ -68,18 +74,22 @@ func (r *SessionRepo) CreateSession(session *model.Session) error {
 }
 
 func (r *SessionRepo) GetSession(sessionID string) (*model.Session, error) {
+	timer := utils.TrackDBOperation("find", "sessions")
+	defer timer.ObserveDuration()
+
 	if sessionID == "" {
+		utils.TrackError("database", "empty_session_id")
 		return nil, fmt.Errorf("sessionID cannot be empty")
 	}
 
-	// Try cache first if enabled
 	if services.GlobalSessionCache != nil {
 		if session, err := services.GlobalSessionCache.GetSession(sessionID); err == nil && session != nil {
+			utils.TrackCacheOperation("session", true) // Cache hit
 			return session, nil
 		}
+		utils.TrackCacheOperation("session", false) // Cache miss
 	}
 
-	// Cache miss or disabled - get from MongoDB
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -87,14 +97,16 @@ func (r *SessionRepo) GetSession(sessionID string) (*model.Session, error) {
 	err := r.MongoCollection.FindOne(ctx, bson.M{"session_id": sessionID}).Decode(&session)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
+			utils.TrackError("database", "session_not_found")
 			return nil, nil
 		}
+		utils.TrackError("database", "session_fetch_failed")
 		return nil, fmt.Errorf("failed to fetch session from database: %w", err)
 	}
 
-	// Cache the result if caching is enabled
 	if services.GlobalSessionCache != nil {
 		if err := services.GlobalSessionCache.SetSession(&session); err != nil {
+			utils.TrackError("cache", "session_cache_set_failed")
 			log.Printf("Warning: Failed to cache session: %v", err)
 		}
 	}
@@ -148,21 +160,26 @@ func (r *SessionRepo) UpdateSession(session *model.Session) error {
 }
 
 func (r *SessionRepo) DeleteSession(sessionID string) error {
+	timer := utils.TrackDBOperation("delete", "sessions")
+	defer timer.ObserveDuration()
+
 	if sessionID == "" {
+		utils.TrackError("database", "empty_session_id")
 		return fmt.Errorf("sessionID cannot be empty")
 	}
 
-	// Get session first to check protected status and get userID
 	session, err := r.GetSession(sessionID)
 	if err != nil {
+		utils.TrackError("database", "session_fetch_failed")
 		return fmt.Errorf("failed to fetch session for deletion: %w", err)
 	}
 	if session == nil {
+		utils.TrackError("database", "session_not_found")
 		return fmt.Errorf("session not found")
 	}
 
-	// Check protected status
 	if session.Protected {
+		utils.TrackError("database", "protected_session_deletion_attempt")
 		return fmt.Errorf("cannot delete protected session")
 	}
 
@@ -171,20 +188,23 @@ func (r *SessionRepo) DeleteSession(sessionID string) error {
 
 	result, err := r.MongoCollection.DeleteOne(ctx, bson.M{"session_id": sessionID})
 	if err != nil {
+		utils.TrackError("database", "session_deletion_failed")
 		return fmt.Errorf("failed to delete session from database: %w", err)
 	}
 
 	if result.DeletedCount == 0 {
+		utils.TrackError("database", "session_not_found")
 		return fmt.Errorf("session not found")
 	}
 
-	// Update cache if enabled
 	if services.GlobalSessionCache != nil {
 		if err := services.GlobalSessionCache.DeleteSession(sessionID); err != nil {
+			utils.TrackError("cache", "session_cache_delete_failed")
 			log.Printf("Warning: Failed to delete session from cache: %v", err)
 		}
 
 		if err := services.GlobalSessionCache.IncrementSessionVersion(session.UserID); err != nil {
+			utils.TrackError("cache", "session_version_increment_failed")
 			log.Printf("Warning: Failed to increment session version: %v", err)
 		}
 	}
@@ -217,32 +237,36 @@ func (r *SessionRepo) DeleteUserSessions(userID string) error {
 }
 
 func (r *SessionRepo) GetUserActiveSessions(userID string) ([]*model.Session, error) {
+	timer := utils.TrackDBOperation("find", "sessions")
+	defer timer.ObserveDuration()
+
 	if userID == "" {
+		utils.TrackError("database", "empty_user_id")
 		return nil, fmt.Errorf("userID cannot be empty")
 	}
 
-	// Try cache first if enabled
 	if services.GlobalSessionCache != nil {
 		sessions, isStale, err := services.GlobalSessionCache.GetUserSessions(userID)
 		if err == nil && sessions != nil && !isStale {
+			utils.TrackCacheOperation("user_sessions", true)
 			return sessions, nil
 		}
+		utils.TrackCacheOperation("user_sessions", false)
 
-		// If cache is stale or needs refresh, fetch from database
 		needsRefresh, _ := services.GlobalSessionCache.NeedsRefresh(userID)
 		if isStale || needsRefresh {
 			sessions, err = r.fetchAndCacheActiveSessions(userID)
 			if err != nil {
 				if isStale {
-					return sessions, nil // Return stale data if fresh fetch fails
+					return sessions, nil
 				}
+				utils.TrackError("database", "session_fetch_failed")
 				return nil, err
 			}
 			return sessions, nil
 		}
 	}
 
-	// Cache disabled or complete cache miss - fetch from database
 	return r.fetchAndCacheActiveSessions(userID)
 }
 

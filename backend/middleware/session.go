@@ -11,6 +11,15 @@ import (
 	"github.com/google/uuid"
 )
 
+type SessionRepository interface {
+	CreateSession(*model.Session) error
+	GetSession(string) (*model.Session, error)
+	UpdateSession(*model.Session) error
+	DeleteSession(string) error
+	CountActiveSessions(string) (int, error)
+	EndLeastActiveSession(string) error
+}
+
 func SessionMiddleware(sessionRepo *repository.SessionRepo) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sessionID, err := c.Cookie("session_id")
@@ -44,38 +53,38 @@ func SessionMiddleware(sessionRepo *repository.SessionRepo) gin.HandlerFunc {
 	}
 }
 func CreateSession(c *gin.Context, userID string, sessionRepo *repository.SessionRepo) error {
-    // Generate session name from user agent
-    userAgent := c.Request.UserAgent()
-    browser, os, device := utils.ParseUserAgent(userAgent)
+	// Generate session name from user agent
+	userAgent := c.Request.UserAgent()
+	browser, os, device := utils.ParseUserAgent(userAgent)
 
-    // Create display name
-    displayName := utils.GenerateSessionName(userAgent, "")  // Empty string for location for now
+	// Create display name
+	displayName := utils.GenerateSessionName(userAgent, "") // Empty string for location for now
 
-    session := &model.Session{
-        SessionID:      uuid.New().String(),
-        UserID:         userID,
-        DisplayName:    displayName,
-        DeviceInfo:     fmt.Sprintf("%s on %s (%s)", browser, os, device),
-        CreatedAt:      time.Now(),
-        ExpiresAt:      time.Now().Add(24 * time.Hour),
-        LastActivityAt: time.Now(),
-        IPAddress:      c.ClientIP(),
-        IsActive:       true,
-    }
+	session := &model.Session{
+		SessionID:      uuid.New().String(),
+		UserID:         userID,
+		DisplayName:    displayName,
+		DeviceInfo:     fmt.Sprintf("%s on %s (%s)", browser, os, device),
+		CreatedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
+		LastActivityAt: time.Now(),
+		IPAddress:      c.ClientIP(),
+		IsActive:       true,
+	}
 
-    if err := sessionRepo.CreateSession(session); err != nil {
-        return err
-    }
+	if err := sessionRepo.CreateSession(session); err != nil {
+		return err
+	}
 
-    c.SetCookie(
-        "session_id",
-        session.SessionID,
-        int(24*time.Hour.Seconds()),
-        "/",
-        "",
-        true,
-        true,
-    )
+	c.SetCookie(
+		"session_id",
+		session.SessionID,
+		int(24*time.Hour.Seconds()),
+		"/",
+		"",
+		true,
+		true,
+	)
 
-    return nil
+	return nil
 }

@@ -4,7 +4,7 @@ import (
 	"main/model"
 	"main/repository"
 	"main/utils"
-	"os"
+	"time"
 
 	"main/services"
 	"main/usecase"
@@ -15,44 +15,40 @@ import (
 )
 
 func RegistrationHandler(c *gin.Context) {
-	var user model.User
+	// Start timing the request
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start).Seconds()
+		utils.HTTPRequestDuration.WithLabelValues("POST", "/register").Observe(duration)
+		utils.RequestDistribution.WithLabelValues("/register", fmt.Sprintf("%d", c.Writer.Status())).Observe(duration)
+	}()
 
-	// Debug logging
-	fmt.Printf("GO_ENV: %s\n", os.Getenv("GO_ENV"))
-	fmt.Printf("Database: %s\n", os.Getenv("MONGO_DB"))
+	var user model.User
 
 	// Bind JSON and validate request
 	if err := c.ShouldBindJSON(&user); err != nil {
-		fmt.Printf("Bind error: %v\n", err)
+		utils.TrackError("registration", "validation_error")
 		utils.BadRequest(c, "invalid request")
 		return
 	}
-
-	// Debug logging
-	fmt.Printf("User data: %+v\n", user)
-
-	// Select database based on environment
-	dbName := "tonotes"
-	if os.Getenv("GO_ENV") == "test" {
-		dbName = "tonotes_test"
-	}
-
-	// Debug logging
-	fmt.Printf("Using database: %s\n", dbName)
 
 	userRepo := repository.GetUserRepo(utils.MongoClient)
 	userService := &usecase.UserService{
 		UsersRepo: userRepo,
 	}
 
-	// Create user
+	// Track database operation timing
+	dbTimer := utils.TrackDBOperation("create", "users")
 	err := userService.CreateUser(c, &user)
+	dbTimer.ObserveDuration()
+
 	if err != nil {
-		fmt.Printf("CreateUser error: %v\n", err)
 		if err.Error() == "username already exists" {
+			utils.TrackError("registration", "duplicate_username")
 			utils.Conflict(c, "username already exists")
 			return
 		}
+		utils.TrackError("registration", "creation_failed")
 		utils.BadRequest(c, "invalid request")
 		return
 	}
@@ -60,18 +56,25 @@ func RegistrationHandler(c *gin.Context) {
 	// Generate access token
 	token, err := services.GenerateToken(user.UserID)
 	if err != nil {
-		fmt.Printf("Token generation error: %v\n", err)
+		utils.TrackError("registration", "token_generation")
 		utils.InternalError(c, "failed to generate token")
 		return
 	}
+	utils.TokenUsage.WithLabelValues("access", "generated").Inc()
 
 	// Generate refresh token
 	refreshToken, err := services.GenerateRefreshToken(user.UserID)
 	if err != nil {
-		fmt.Printf("Refresh token generation error: %v\n", err)
+		utils.TrackError("registration", "refresh_token_generation")
 		utils.InternalError(c, "failed to generate refresh token")
 		return
 	}
+	utils.TokenUsage.WithLabelValues("refresh", "generated").Inc()
+
+	// Track successful registration
+	utils.TrackRegistration()
+	utils.UserGrowthRate.Inc()
+	utils.TrackUserActivity(user.UserID)
 
 	utils.Created(c, gin.H{
 		"message": "user registered successfully",

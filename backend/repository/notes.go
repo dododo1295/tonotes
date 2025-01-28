@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"main/model"
+	"main/utils"
 	"os"
 	"regexp"
 	"sort"
@@ -44,12 +45,14 @@ type NotesSearchOptions struct {
 }
 
 func (r *NotesRepo) FindNotes(opts NotesSearchOptions) ([]*model.Notes, error) {
+	timer := utils.TrackDBOperation("find", "notes")
+	defer timer.ObserveDuration()
+
 	filter := bson.M{
 		"user_id":     opts.UserID,
 		"is_archived": false,
 	}
 
-	// Handle text search
 	if opts.Query != "" {
 		if !strings.Contains(opts.Query, " ") {
 			filter["$text"] = bson.M{"$search": opts.Query}
@@ -71,7 +74,6 @@ func (r *NotesRepo) FindNotes(opts NotesSearchOptions) ([]*model.Notes, error) {
 		}
 	}
 
-	// Handle tag filtering
 	if len(opts.Tags) > 0 {
 		if opts.MatchAll {
 			filter["tags"] = bson.M{"$all": opts.Tags}
@@ -82,7 +84,6 @@ func (r *NotesRepo) FindNotes(opts NotesSearchOptions) ([]*model.Notes, error) {
 
 	findOptions := options.Find()
 
-	// Handle sorting
 	if opts.SearchScore && opts.Query != "" && !strings.Contains(opts.Query, " ") {
 		findOptions.SetProjection(bson.M{
 			"score": bson.M{"$meta": "textScore"},
@@ -92,12 +93,12 @@ func (r *NotesRepo) FindNotes(opts NotesSearchOptions) ([]*model.Notes, error) {
 			{Key: "created_at", Value: -1},
 		})
 	} else {
-		sortOrder := -1 // default to descending
+		sortOrder := -1
 		if opts.SortOrder == "asc" {
 			sortOrder = 1
 		}
 
-		sortField := "created_at" // default sort field
+		sortField := "created_at"
 		if opts.SortBy != "" {
 			sortField = opts.SortBy
 		}
@@ -105,19 +106,19 @@ func (r *NotesRepo) FindNotes(opts NotesSearchOptions) ([]*model.Notes, error) {
 		findOptions.SetSort(bson.D{{Key: sortField, Value: sortOrder}})
 	}
 
-	// Execute the query
 	cursor, err := r.MongoCollection.Find(context.Background(), filter, findOptions)
 	if err != nil {
+		utils.TrackError("database", "note_search_failed")
 		return nil, err
 	}
 	defer cursor.Close(context.Background())
 
 	var notes []*model.Notes
 	if err = cursor.All(context.Background(), &notes); err != nil {
+		utils.TrackError("database", "note_decode_failed")
 		return nil, err
 	}
 
-	// Handle multi-word search sorting
 	if opts.Query != "" && strings.Contains(opts.Query, " ") {
 		sort.SliceStable(notes, func(i, j int) bool {
 			if opts.SearchScore {
@@ -127,11 +128,9 @@ func (r *NotesRepo) FindNotes(opts NotesSearchOptions) ([]*model.Notes, error) {
 					return matchesI > matchesJ
 				}
 			}
-			// Always ensure consistent descending order by creation date
 			return notes[i].CreatedAt.After(notes[j].CreatedAt)
 		})
 	} else if opts.SortBy == "created_at" || opts.Query == "" {
-		// Ensure consistent sorting by created_at for non-search queries
 		sort.SliceStable(notes, func(i, j int) bool {
 			if opts.SortOrder == "asc" {
 				return notes[i].CreatedAt.Before(notes[j].CreatedAt)
@@ -222,7 +221,11 @@ func (r *NotesRepo) CountNotesByTag(userID string) (map[string]int, error) {
 
 // CreateNote creates a new note
 func (r *NotesRepo) CreateNote(note *model.Notes) error {
+	timer := utils.TrackDBOperation("insert", "notes")
+	defer timer.ObserveDuration()
+
 	if note.UserID == "" {
+		utils.TrackError("database", "missing_user_id")
 		return errors.New("user ID is required")
 	}
 
@@ -230,7 +233,13 @@ func (r *NotesRepo) CreateNote(note *model.Notes) error {
 	note.UpdatedAt = time.Now()
 
 	_, err := r.MongoCollection.InsertOne(context.Background(), note)
-	return err
+	if err != nil {
+		utils.TrackError("database", "note_creation_failed")
+		return err
+	}
+
+	utils.TrackNoteCreation(note.UserID)
+	return nil
 }
 
 // GetUserNotes retrieves all notes for a user
@@ -267,6 +276,9 @@ func (r *NotesRepo) GetNote(noteID string, userID string) (*model.Notes, error) 
 
 // UpdateNote updates a specific note
 func (r *NotesRepo) UpdateNote(noteID string, userID string, updates *model.Notes) error {
+	timer := utils.TrackDBOperation("update", "notes")
+	defer timer.ObserveDuration()
+
 	updates.UpdatedAt = time.Now()
 
 	filter := bson.M{
@@ -285,10 +297,12 @@ func (r *NotesRepo) UpdateNote(noteID string, userID string, updates *model.Note
 
 	result, err := r.MongoCollection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
+		utils.TrackError("database", "note_update_failed")
 		return err
 	}
 
 	if result.MatchedCount == 0 {
+		utils.TrackError("database", "note_not_found")
 		return errors.New("note not found")
 	}
 
@@ -297,6 +311,9 @@ func (r *NotesRepo) UpdateNote(noteID string, userID string, updates *model.Note
 
 // DeleteNote deletes a specific note
 func (r *NotesRepo) DeleteNote(noteID string, userID string) error {
+	timer := utils.TrackDBOperation("delete", "notes")
+	defer timer.ObserveDuration()
+
 	filter := bson.M{
 		"_id":     noteID,
 		"user_id": userID,
@@ -304,10 +321,12 @@ func (r *NotesRepo) DeleteNote(noteID string, userID string) error {
 
 	result, err := r.MongoCollection.DeleteOne(context.Background(), filter)
 	if err != nil {
+		utils.TrackError("database", "note_deletion_failed")
 		return err
 	}
 
 	if result.DeletedCount == 0 {
+		utils.TrackError("database", "note_not_found")
 		return errors.New("note not found")
 	}
 
@@ -316,6 +335,9 @@ func (r *NotesRepo) DeleteNote(noteID string, userID string) error {
 
 // ArchiveNote toggles the archived status of a note
 func (r *NotesRepo) ArchiveNote(noteID string, userID string) error {
+	timer := utils.TrackDBOperation("update", "notes")
+	defer timer.ObserveDuration()
+
 	var note model.Notes
 	filter := bson.M{
 		"_id":     noteID,
@@ -324,6 +346,7 @@ func (r *NotesRepo) ArchiveNote(noteID string, userID string) error {
 
 	err := r.MongoCollection.FindOne(context.Background(), filter).Decode(&note)
 	if err != nil {
+		utils.TrackError("database", "note_not_found")
 		return err
 	}
 
@@ -336,10 +359,12 @@ func (r *NotesRepo) ArchiveNote(noteID string, userID string) error {
 
 	result, err := r.MongoCollection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
+		utils.TrackError("database", "archive_operation_failed")
 		return err
 	}
 
 	if result.MatchedCount == 0 {
+		utils.TrackError("database", "note_not_found")
 		return errors.New("note not found")
 	}
 

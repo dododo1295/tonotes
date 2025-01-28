@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"log"
 	"main/middleware"
 	"main/model"
@@ -8,6 +9,7 @@ import (
 	"main/services"
 	"main/usecase"
 	"main/utils"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pquerna/otp/totp"
@@ -16,9 +18,20 @@ import (
 const MaxActiveSessions = 5
 
 func LoginHandler(c *gin.Context, sessionRepo *repository.SessionRepo) {
+	// Start timing the request
+	start := time.Now()
+	defer func() {
+		// Track request duration and distribution
+		duration := time.Since(start).Seconds()
+		utils.HTTPRequestDuration.WithLabelValues("POST", "/login").Observe(duration)
+		utils.RequestDistribution.WithLabelValues("/login", fmt.Sprintf("%d", c.Writer.Status())).Observe(duration)
+	}()
+
 	var loginReq model.LoginRequest
 
 	if err := c.ShouldBindJSON(&loginReq); err != nil {
+		utils.TrackError("auth", "invalid_request")
+		utils.TrackAuthAttempt("failure", "validation")
 		utils.BadRequest(c, "Invalid Request")
 		return
 	}
@@ -28,13 +41,21 @@ func LoginHandler(c *gin.Context, sessionRepo *repository.SessionRepo) {
 		UsersRepo: userRepo,
 	}
 
+	// Track DB operation timing
+	dbTimer := utils.TrackDBOperation("find", "users")
 	user, err := userService.FindUserByUsername(loginReq.Username)
+	dbTimer.ObserveDuration()
+
 	if err != nil {
+		utils.TrackError("auth", "user_lookup")
+		utils.TrackAuthAttempt("failure", "invalid_username")
 		utils.Unauthorized(c, "Invalid username")
 		return
 	}
 
 	if user == nil {
+		utils.TrackError("auth", "user_not_found")
+		utils.TrackAuthAttempt("failure", "user_not_found")
 		utils.Unauthorized(c, "Invalid username")
 		return
 	}
@@ -42,70 +63,86 @@ func LoginHandler(c *gin.Context, sessionRepo *repository.SessionRepo) {
 	// Verify password
 	checkPassword, err := services.VerifyPassword(user.Password, loginReq.Password)
 	if err != nil {
+		utils.TrackError("auth", "password_verification")
+		utils.TrackAuthAttempt("failure", "password_verification_error")
 		utils.Unauthorized(c, "Incorrect Password")
 		return
 	}
 	if !checkPassword {
+		utils.TrackAuthAttempt("failure", "invalid_password")
 		utils.Unauthorized(c, "Incorrect Password")
 		return
 	}
 
-	// Check if 2FA is enabled
+	// 2FA Handling with metrics
 	if user.TwoFactorEnabled {
-		// If 2FA is enabled but no code provided
 		if loginReq.TwoFactorCode == "" {
+			utils.TrackAuthAttempt("pending", "2fa_required")
 			utils.Success(c, gin.H{
 				"requires_2fa": true,
 				"message":      "2FA code required",
-				"user_id":      user.UserID, // Optionally include user ID for subsequent 2FA verification
+				"user_id":      user.UserID,
 			})
 			return
 		}
 
-		// Verify 2FA code
 		valid := totp.Validate(loginReq.TwoFactorCode, user.TwoFactorSecret)
 		if !valid {
+			utils.TrackAuthAttempt("failure", "invalid_2fa")
+			utils.TrackError("auth", "invalid_2fa_code")
 			utils.Unauthorized(c, "Invalid 2FA code")
 			return
 		}
+		utils.TrackAuthAttempt("success", "2fa")
 	}
 
-	// Check active session count
+	// Session management with metrics
 	activeCount, err := sessionRepo.CountActiveSessions(user.UserID)
 	if err != nil {
+		utils.TrackError("session", "count_check")
 		utils.InternalError(c, "Failed to check session count")
 		return
 	}
 
 	var notice string
 	if activeCount >= MaxActiveSessions {
-		// End the least active session instead of rejecting the login
 		if err := sessionRepo.EndLeastActiveSession(user.UserID); err != nil {
+			utils.TrackError("session", "session_cleanup")
 			utils.InternalError(c, "Failed to manage sessions")
 			return
 		}
 		notice = "Logged out of least active session due to session limit"
 		log.Printf("Ended least active session for user %s due to session limit", user.UserID)
+		utils.TrackError("session", "session_limit_reached")
 	}
 
-	// Generate tokens
+	// Token generation with metrics
 	token, err := services.GenerateToken(user.UserID)
 	if err != nil {
+		utils.TrackError("auth", "token_generation")
 		utils.InternalError(c, "Failed to generate token")
 		return
 	}
+	utils.TokenUsage.WithLabelValues("access", "generated").Inc()
 
 	refreshToken, err := services.GenerateRefreshToken(user.UserID)
 	if err != nil {
+		utils.TrackError("auth", "refresh_token_generation")
 		utils.InternalError(c, "Failed to generate refresh token")
 		return
 	}
+	utils.TokenUsage.WithLabelValues("refresh", "generated").Inc()
 
-	// Create new session
+	// Session creation with metrics
 	if err := middleware.CreateSession(c, user.UserID, sessionRepo); err != nil {
+		utils.TrackError("session", "creation")
 		utils.InternalError(c, "Failed to create session")
 		return
 	}
+
+	// Track successful login and user activity
+	utils.TrackAuthAttempt("success", "login")
+	utils.TrackUserActivity(user.UserID)
 
 	// Prepare response
 	response := gin.H{
@@ -119,11 +156,9 @@ func LoginHandler(c *gin.Context, sessionRepo *repository.SessionRepo) {
 		},
 	}
 
-	// Add notice if a session was ended
 	if notice != "" {
 		response["notice"] = notice
 	}
 
-	// Return success response
 	utils.Success(c, response)
 }

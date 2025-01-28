@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"main/model"
+	"main/utils"
 	"os"
 	"time"
 
@@ -26,25 +27,39 @@ func GetTodosRepo(client *mongo.Client) *TodosRepo {
 
 // CreateTodo adds a new todo
 func (r *TodosRepo) CreateTodo(todo *model.Todos) error {
+	timer := utils.TrackDBOperation("insert", "todos")
+	defer timer.ObserveDuration()
+
 	if todo.UserID == "" {
+		utils.TrackError("database", "missing_user_id")
 		return errors.New("user ID is required")
 	}
 
 	_, err := r.MongoCollection.InsertOne(context.Background(), todo)
-	return err
+	if err != nil {
+		utils.TrackError("database", "todo_creation_failed")
+		return err
+	}
+
+	return nil
 }
 
 // GetUserTodos retrieves all todos for a user
 func (r *TodosRepo) GetUserTodos(userID string) ([]*model.Todos, error) {
+	timer := utils.TrackDBOperation("find", "todos")
+	defer timer.ObserveDuration()
+
 	var todos []*model.Todos
 	cursor, err := r.MongoCollection.Find(context.Background(),
 		bson.M{"user_id": userID})
 	if err != nil {
+		utils.TrackError("database", "todo_fetch_failed")
 		return nil, err
 	}
 	defer cursor.Close(context.Background())
 
 	if err = cursor.All(context.Background(), &todos); err != nil {
+		utils.TrackError("database", "todo_decode_failed")
 		return nil, err
 	}
 	return todos, nil
@@ -52,9 +67,12 @@ func (r *TodosRepo) GetUserTodos(userID string) ([]*model.Todos, error) {
 
 // UpdateTodo updates a specific todo
 func (r *TodosRepo) UpdateTodo(todoID string, userID string, updates *model.Todos) error {
+	timer := utils.TrackDBOperation("update", "todos")
+	defer timer.ObserveDuration()
+
 	filter := bson.M{
 		"_id":     todoID,
-		"user_id": userID, // Ensure user owns this todo
+		"user_id": userID,
 	}
 
 	update := bson.M{
@@ -68,11 +86,18 @@ func (r *TodosRepo) UpdateTodo(todoID string, userID string, updates *model.Todo
 
 	result, err := r.MongoCollection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
+		utils.TrackError("database", "todo_update_failed")
 		return err
 	}
 
 	if result.MatchedCount == 0 {
+		utils.TrackError("database", "todo_not_found")
 		return errors.New("todo not found")
+	}
+
+	// Track todo completion if the update includes setting complete to true
+	if updates.Complete {
+		utils.TrackTodoCompletion(userID)
 	}
 
 	return nil
@@ -80,17 +105,22 @@ func (r *TodosRepo) UpdateTodo(todoID string, userID string, updates *model.Todo
 
 // DeleteTodo removes a specific todo
 func (r *TodosRepo) DeleteTodo(todoID string, userID string) error {
+	timer := utils.TrackDBOperation("delete", "todos")
+	defer timer.ObserveDuration()
+
 	filter := bson.M{
 		"_id":     todoID,
-		"user_id": userID, // Ensure user owns this todo
+		"user_id": userID,
 	}
 
 	result, err := r.MongoCollection.DeleteOne(context.Background(), filter)
 	if err != nil {
+		utils.TrackError("database", "todo_deletion_failed")
 		return err
 	}
 
 	if result.DeletedCount == 0 {
+		utils.TrackError("database", "todo_not_found")
 		return errors.New("todo not found")
 	}
 
@@ -99,33 +129,44 @@ func (r *TodosRepo) DeleteTodo(todoID string, userID string) error {
 
 // ToggleTodoComplete toggles the complete status of a todo
 func (r *TodosRepo) ToggleTodoComplete(todoID string, userID string) error {
+	timer := utils.TrackDBOperation("update", "todos")
+	defer timer.ObserveDuration()
+
 	filter := bson.M{
 		"_id":     todoID,
 		"user_id": userID,
 	}
 
-	// First, get the current complete status
 	var todo model.Todos
 	err := r.MongoCollection.FindOne(context.Background(), filter).Decode(&todo)
 	if err != nil {
+		utils.TrackError("database", "todo_not_found")
 		return err
 	}
 
 	// Toggle the complete status
+	newCompleteStatus := !todo.Complete
 	update := bson.M{
 		"$set": bson.M{
-			"complete":   !todo.Complete,
+			"complete":   newCompleteStatus,
 			"updated_at": time.Now(),
 		},
 	}
 
 	result, err := r.MongoCollection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
+		utils.TrackError("database", "todo_update_failed")
 		return err
 	}
 
 	if result.MatchedCount == 0 {
+		utils.TrackError("database", "todo_not_found")
 		return errors.New("todo not found")
+	}
+
+	// Track completion if the todo was marked as complete
+	if newCompleteStatus {
+		utils.TrackTodoCompletion(userID)
 	}
 
 	return nil
