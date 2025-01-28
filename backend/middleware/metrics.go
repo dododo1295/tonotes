@@ -137,6 +137,81 @@ var (
 			Help:      "Mean Time To Recovery in minutes",
 		},
 	)
+	ErrorsByType = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "tonotes",
+			Name:      "errors_total",
+			Help:      "Total number of errors by type",
+		},
+		[]string{"type", "code"}, // e.g., "validation", "database", "auth"
+	)
+	DependencyHealth = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "tonotes",
+			Name:      "dependency_health",
+			Help:      "Health status of service dependencies",
+		},
+		[]string{"service", "endpoint"},
+	)
+	CacheSize = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "tonotes",
+			Name:      "cache_size_bytes",
+			Help:      "Current size of cache in bytes",
+		},
+		[]string{"cache_type"},
+	)
+	CacheEvictions = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "tonotes",
+			Name:      "cache_evictions_total",
+			Help:      "Number of cache evictions",
+		},
+		[]string{"cache_type"},
+	)
+	// API Health Metrics
+	APIHealthcheck = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "tonotes",
+			Name:      "api_health_status",
+			Help:      "API endpoint health status (1 for up, 0 for down)",
+		},
+		[]string{"endpoint"},
+	)
+
+	// Rate Limiting Metrics
+	RateLimitHits = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "tonotes",
+			Name:      "rate_limit_hits_total",
+			Help:      "Number of times rate limits were hit",
+		},
+		[]string{"endpoint"},
+	)
+	// System Health Metrics
+	SystemMemoryUsage = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "tonotes",
+			Name:      "system_memory_usage_bytes",
+			Help:      "Current system memory usage in bytes",
+		},
+	)
+
+	SystemCPUUsage = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "tonotes",
+			Name:      "system_cpu_usage_percent",
+			Help:      "Current CPU usage percentage",
+		},
+	)
+
+	GoroutineCount = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "tonotes",
+			Name:      "goroutine_count",
+			Help:      "Number of running goroutines",
+		},
+	)
 
 	// Business Metrics
 	NotesCreated = promauto.NewCounterVec(
@@ -231,4 +306,35 @@ func TrackNoteCreation(userID string) {
 
 func TrackTodoCompletion(userID string) {
 	TodosCompleted.WithLabelValues(userID).Inc()
+}
+func TrackAPIHealth(endpoint string, isHealthy bool) {
+	status := 0.0
+	if isHealthy {
+		status = 1.0
+	}
+	APIHealthcheck.WithLabelValues(endpoint).Set(status)
+}
+
+func TrackRateLimit(endpoint string) {
+	RateLimitHits.WithLabelValues(endpoint).Inc()
+}
+
+func TrackError(errorType, code string) {
+	ErrorsByType.WithLabelValues(errorType, code).Inc()
+}
+
+func TrackDependencyHealth(service, endpoint string, isHealthy bool) {
+	status := 0.0
+	if isHealthy {
+		status = 1.0
+	}
+	DependencyHealth.WithLabelValues(service, endpoint).Set(status)
+}
+
+func UpdateCacheSize(cacheType string, sizeBytes float64) {
+	CacheSize.WithLabelValues(cacheType).Set(sizeBytes)
+}
+
+func TrackCacheEviction(cacheType string) {
+	CacheEvictions.WithLabelValues(cacheType).Inc()
 }
