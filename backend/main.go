@@ -88,9 +88,9 @@ func collectSystemMetrics() {
 			// Update system metrics
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			middleware.SystemMemoryUsage.Set(float64(m.Alloc))
-			middleware.SystemCPUUsage.Set(utils.GetCPUUsage())
-			middleware.GoroutineCount.Set(float64(runtime.NumGoroutine()))
+			utils.SystemMemoryUsage.Set(float64(m.Alloc))
+			utils.SystemCPUUsage.Set(utils.GetCPUUsage())
+			utils.GoroutineCount.Set(float64(runtime.NumGoroutine()))
 		}
 	}()
 }
@@ -168,7 +168,7 @@ func setupRouter() *gin.Engine {
 		middleware.EnhancedRecoveryMiddleware(),
 		middleware.CORSMiddleware(),
 		middleware.RequestTracingMiddleware(),
-		middleware.MetricsMiddleware(),
+		utils.MetricsUtil(),
 		middleware.RequestSizeLimiter(10<<20),
 	)
 	// initialize repository
@@ -202,14 +202,14 @@ func setupRouter() *gin.Engine {
 		// Check MongoDB connection
 		if err := utils.CheckMongoConnection(); err != nil {
 			health["services"].(map[string]string)["mongodb"] = "down"
-			middleware.TrackDependencyHealth("mongodb", "connection", false)
+			utils.TrackDependencyHealth("mongodb", "connection", false)
 		} else {
 			health["services"].(map[string]string)["mongodb"] = "up"
-			middleware.TrackDependencyHealth("mongodb", "connection", true)
+			utils.TrackDependencyHealth("mongodb", "connection", true)
 		}
 
 		// Track API health
-		middleware.TrackAPIHealth("/health", true)
+		utils.TrackAPIHealth("/health", true)
 
 		c.JSON(http.StatusOK, health)
 	})
@@ -390,10 +390,10 @@ func cleanup(ctx context.Context) {
 		if err := utils.CloseMongoConnection(); err != nil {
 			log.Printf("Error disconnecting from MongoDB: %v", err)
 			errChan <- err
-			middleware.TrackDependencyHealth("mongodb", "cleanup", false)
-			middleware.TrackError("cleanup", "mongodb_disconnect")
+			utils.TrackDependencyHealth("mongodb", "cleanup", false)
+			utils.TrackError("cleanup", "mongodb_disconnect")
 		} else {
-			middleware.TrackDependencyHealth("mongodb", "cleanup", true)
+			utils.TrackDependencyHealth("mongodb", "cleanup", true)
 		}
 	}()
 
@@ -405,10 +405,10 @@ func cleanup(ctx context.Context) {
 			if err := services.TokenBlacklist.Close(); err != nil {
 				log.Printf("Error closing token blacklist: %v", err)
 				errChan <- err
-				middleware.TrackDependencyHealth("redis", "blacklist_cleanup", false)
-				middleware.TrackError("cleanup", "redis_blacklist")
+				utils.TrackDependencyHealth("redis", "blacklist_cleanup", false)
+				utils.TrackError("cleanup", "redis_blacklist")
 			} else {
-				middleware.TrackDependencyHealth("redis", "blacklist_cleanup", true)
+				utils.TrackDependencyHealth("redis", "blacklist_cleanup", true)
 			}
 		}()
 	}
@@ -421,10 +421,10 @@ func cleanup(ctx context.Context) {
 			if err := services.GlobalSessionCache.Close(); err != nil {
 				log.Printf("Error closing session cache: %v", err)
 				errChan <- err
-				middleware.TrackDependencyHealth("redis", "session_cache_cleanup", false)
-				middleware.TrackError("cleanup", "redis_session_cache")
+				utils.TrackDependencyHealth("redis", "session_cache_cleanup", false)
+				utils.TrackError("cleanup", "redis_session_cache")
 			} else {
-				middleware.TrackDependencyHealth("redis", "session_cache_cleanup", true)
+				utils.TrackDependencyHealth("redis", "session_cache_cleanup", true)
 			}
 		}()
 	}
@@ -449,22 +449,22 @@ func cleanup(ctx context.Context) {
 
 		if len(cleanupErrors) == 0 {
 			log.Println("Cleanup completed successfully")
-			middleware.UpdateMTTR(time.Since(startTime).Minutes())
-			middleware.TrackDependencyHealth("application", "shutdown", true)
+			utils.UpdateMTTR(time.Since(startTime).Minutes())
+			utils.TrackDependencyHealth("application", "shutdown", true)
 		} else {
 			log.Printf("Cleanup completed with %d errors", len(cleanupErrors))
 			for _, err := range cleanupErrors {
 				log.Printf("Cleanup error: %v", err)
-				middleware.TrackError("cleanup", "failed")
+				utils.TrackError("cleanup", "failed")
 			}
-			middleware.UpdateMTTR(time.Since(startTime).Minutes())
-			middleware.TrackDependencyHealth("application", "shutdown", false)
+			utils.UpdateMTTR(time.Since(startTime).Minutes())
+			utils.TrackDependencyHealth("application", "shutdown", false)
 		}
 
 	case <-ctx.Done():
 		log.Println("Cleanup timed out")
-		middleware.TrackError("cleanup", "timeout")
-		middleware.UpdateMTTR(time.Since(startTime).Minutes())
-		middleware.TrackDependencyHealth("application", "shutdown", false)
+		utils.TrackError("cleanup", "timeout")
+		utils.UpdateMTTR(time.Since(startTime).Minutes())
+		utils.TrackDependencyHealth("application", "shutdown", false)
 	}
 }
