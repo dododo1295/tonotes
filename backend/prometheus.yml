@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s # How frequently to scrape targets
+  evaluation_interval: 15s # How frequently to evaluate rules
+
+# Rule configurations for TLS metrics
+rule_files:
+  - "tls_rules.yml" # Create this file for TLS-specific recording rules
+
+scrape_configs:
+  - job_name: "tonotes"
+    static_configs:
+      - targets: ["host.docker.internal:1004"]
+    metrics_path: "/metrics"
+    scheme: "https" # If your metrics endpoint uses HTTPS
+    tls_config: # Add TLS config if needed
+      insecure_skip_verify: true # Only for development; use proper certs in production
+
+    # Metric relabeling for TLS metrics
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: "go_tls_.*|tls_.*"
+        action: keep

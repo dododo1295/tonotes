@@ -27,5 +27,3 @@ dist-ssr
 .zed
 .env
 EncryptedNotes.md
-prometheus.yml
-docker-compose.yml
