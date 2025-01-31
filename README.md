@@ -40,7 +40,7 @@ ___
 
 ---
 ### Wishlist
-- ❎ Notes Encryption and Decryption
+- ❎ E2EE w/ Zero-Knowledge (have to learn more about this)
 - ❎ Export features...
 
 ---
