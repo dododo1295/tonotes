@@ -16,7 +16,7 @@ type TodosRepo struct {
 	MongoCollection *mongo.Collection
 }
 
-// Constructor function for TodosRepo
+// Retrieves MongoDB collection for todos
 func GetTodosRepo(client *mongo.Client) *TodosRepo {
 	dbName := os.Getenv("MONGO_DB")
 	collectionName := os.Getenv("TODOS_COLLECTION")
@@ -25,7 +25,7 @@ func GetTodosRepo(client *mongo.Client) *TodosRepo {
 	}
 }
 
-// CreateTodo adds a new todo
+// Add a new todo (following the model) into the database
 func (r *TodosRepo) CreateTodo(todo *model.Todos) error {
 	timer := utils.TrackDBOperation("insert", "todos")
 	defer timer.ObserveDuration()
@@ -35,7 +35,13 @@ func (r *TodosRepo) CreateTodo(todo *model.Todos) error {
 		return errors.New("user ID is required")
 	}
 
-	_, err := r.MongoCollection.InsertOne(context.Background(), todo)
+	validTags, err := validateTags(todo.Tags)
+	if err != nil {
+		return err
+	}
+	todo.Tags = validTags
+
+	_, err = r.MongoCollection.InsertOne(context.Background(), todo)
 	if err != nil {
 		utils.TrackError("database", "todo_creation_failed")
 		return err
@@ -44,7 +50,7 @@ func (r *TodosRepo) CreateTodo(todo *model.Todos) error {
 	return nil
 }
 
-// GetUserTodos retrieves all todos for a user
+// Retrieves all todos based on the User ID
 func (r *TodosRepo) GetUserTodos(userID string) ([]*model.Todos, error) {
 	timer := utils.TrackDBOperation("find", "todos")
 	defer timer.ObserveDuration()
@@ -65,10 +71,16 @@ func (r *TodosRepo) GetUserTodos(userID string) ([]*model.Todos, error) {
 	return todos, nil
 }
 
-// UpdateTodo updates a specific todo
+// All encompassing update for a specific todo (Name, Description, Complete status)
 func (r *TodosRepo) UpdateTodo(todoID string, userID string, updates *model.Todos) error {
 	timer := utils.TrackDBOperation("update", "todos")
 	defer timer.ObserveDuration()
+
+	validTags, err := validateTags(updates.Tags)
+	if err != nil {
+		return err
+	}
+	updates.Tags = validTags
 
 	filter := bson.M{
 		"_id":     todoID,
@@ -81,6 +93,7 @@ func (r *TodosRepo) UpdateTodo(todoID string, userID string, updates *model.Todo
 			"todo_description": updates.TodoDescription,
 			"complete":         updates.Complete,
 			"updated_at":       time.Now(),
+			"tags":             updates.Tags,
 		},
 	}
 
@@ -103,7 +116,7 @@ func (r *TodosRepo) UpdateTodo(todoID string, userID string, updates *model.Todo
 	return nil
 }
 
-// DeleteTodo removes a specific todo
+// Removes a specific todo from database
 func (r *TodosRepo) DeleteTodo(todoID string, userID string) error {
 	timer := utils.TrackDBOperation("delete", "todos")
 	defer timer.ObserveDuration()
@@ -127,7 +140,7 @@ func (r *TodosRepo) DeleteTodo(todoID string, userID string) error {
 	return nil
 }
 
-// ToggleTodoComplete toggles the complete status of a todo
+// Toggles the complete status of a todo
 func (r *TodosRepo) ToggleTodoComplete(todoID string, userID string) error {
 	timer := utils.TrackDBOperation("update", "todos")
 	defer timer.ObserveDuration()
@@ -172,7 +185,7 @@ func (r *TodosRepo) ToggleTodoComplete(todoID string, userID string) error {
 	return nil
 }
 
-// CountUserTodos counts the number of todos for a user
+// Counts the non-sorted number of todos for a user for display in the UI
 func (r *TodosRepo) CountUserTodos(userID string) (int, error) {
 	count, err := r.MongoCollection.CountDocuments(context.Background(),
 		bson.M{"user_id": userID})
@@ -182,7 +195,34 @@ func (r *TodosRepo) CountUserTodos(userID string) (int, error) {
 	return int(count), nil
 }
 
-// GetCompletedTodos gets all completed todos for a user
+// Counts the number of pending todos for a user for display in the UI
+func (r *TodosRepo) GetPendingCount(userID string) (int, error) {
+	timer := utils.TrackDBOperation("count", "pending_todos")
+	defer timer.ObserveDuration()
+
+	count, err := r.MongoCollection.CountDocuments(context.Background(),
+		bson.M{"user_id": userID, "complete": false})
+	if err != nil {
+		utils.TrackError("database", "pending_todo_count_failed")
+		return 0, err
+	}
+	return int(count), nil
+}
+
+// Counts the number of completed todos for a user for display in the UI
+func (r *TodosRepo) GetCompletedCount(userID string) (int, error) {
+	timer := utils.TrackDBOperation("count", "completed_todos")
+	defer timer.ObserveDuration()
+
+	count, err := r.MongoCollection.CountDocuments(context.Background(),
+		bson.M{"user_id": userID, "complete": true})
+	if err != nil {
+		utils.TrackError("database", "completed_todo_count_failed")
+	}
+	return int(count), nil
+}
+
+// Gets all completed todos for a user
 func (r *TodosRepo) GetCompletedTodos(userID string) ([]*model.Todos, error) {
 	filter := bson.M{
 		"user_id":  userID,
@@ -202,7 +242,7 @@ func (r *TodosRepo) GetCompletedTodos(userID string) ([]*model.Todos, error) {
 	return todos, nil
 }
 
-// GetPendingTodos gets all pending todos for a user
+// Gets all pending todos for a user
 func (r *TodosRepo) GetPendingTodos(userID string) ([]*model.Todos, error) {
 	filter := bson.M{
 		"user_id":  userID,
@@ -220,4 +260,29 @@ func (r *TodosRepo) GetPendingTodos(userID string) ([]*model.Todos, error) {
 		return nil, err
 	}
 	return todos, nil
+}
+
+// helper functions
+
+func validateTags(tags []string) ([]string, error) {
+	if tags == nil || len(tags) == 0 {
+		return nil, nil
+	}
+	var validTags []string
+	for _, tag := range tags {
+		if tag != "" {
+			validTags = append(validTags, tag)
+		}
+	}
+	if len(validTags) > 5 {
+		return nil, errors.New("cannot exceed 5 tags per todo")
+	}
+
+	for _, tag := range validTags {
+		if len(tag) > 20 {
+			return nil, errors.New("tag cannot exceed 20 characters")
+		}
+	}
+
+	return validTags, nil
 }
