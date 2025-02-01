@@ -19,6 +19,8 @@ func SetupTestEnvironment() {
 		"MONGO_URI":           "mongodb://localhost:27017",
 		"MONGO_DB":            "tonotes_test",
 		"USERS_COLLECTION":    "users",
+		"NOTES_COLLECTION":    "notes",
+		"TODOS_COLLECTION":    "todos",
 		"JWT_SECRET_KEY":      "test_secret_key",
 		"SESSIONS_COLLECTION": "sessions",
 	}
