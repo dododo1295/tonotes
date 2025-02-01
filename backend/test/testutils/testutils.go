@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
@@ -14,9 +15,16 @@ import (
 
 // SetupTestDB sets up a test database and returns a cleanup function
 func SetupTestEnvironment() {
+	// Load environment variables from .env file
+	if err := godotenv.Load("../.env"); err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
+
+	mongoURI := os.Getenv("MONGO_URI")
+	// Set environment variables
 	envVars := map[string]string{
 		"GO_ENV":              "test",
-		"MONGO_URI":           "mongodb://localhost:27017",
+		"MONGO_URI":           mongoURI,
 		"MONGO_DB":            "tonotes_test",
 		"USERS_COLLECTION":    "users",
 		"NOTES_COLLECTION":    "notes",
@@ -34,9 +42,13 @@ func SetupTestEnvironment() {
 // SetupTestDB sets up a test database and returns a cleanup function
 func SetupTestDB(t *testing.T) (*mongo.Client, func()) {
 	t.Log("Setting up test database")
+	if err := godotenv.Load("../.env"); err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
+	mongoURI := os.Getenv("MONGO_URI")
 
 	client, err := mongo.Connect(context.Background(),
-		options.Client().ApplyURI(os.Getenv("MONGO_URI")))
+		options.Client().ApplyURI(mongoURI))
 	if err != nil {
 		t.Fatalf("Failed to connect to MongoDB: %v", err)
 	}
@@ -49,7 +61,7 @@ func SetupTestDB(t *testing.T) (*mongo.Client, func()) {
 	t.Log("Connected to test database")
 
 	// Create database
-	db := client.Database(os.Getenv("MONGO_DB"))
+	db := client.Database("tonotes_test")
 
 	// Create collections
 	collections := []string{"users", "sessions"}

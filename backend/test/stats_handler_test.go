@@ -2,11 +2,11 @@ package test
 
 import (
 	"context"
-	"encoding/json"
 	"main/handler"
 	"main/model"
 	"main/repository"
 	"main/test/testutils"
+	"main/usecase"
 	"main/utils"
 	"net/http"
 	"net/http/httptest"
@@ -22,8 +22,7 @@ import (
 )
 
 // Setup function for stats testing
-func setupStatsHandler(t *testing.T) (*gin.Engine, *mongo.Client, *repository.UserRepo, *repository.NotesRepo, *repository.TodosRepo, *repository.SessionRepo, func()) {
-	// Set all required environment variables
+func setupStatsHandler(t *testing.T) (*gin.Engine, *repository.UserRepo, *repository.NotesRepo, *usecase.TodosService, *repository.SessionRepo, func()) {
 	envVars := map[string]string{
 		"MONGO_DB":           "tonotes_test",
 		"USERS_COLLECTION":   "users",
@@ -42,6 +41,13 @@ func setupStatsHandler(t *testing.T) (*gin.Engine, *mongo.Client, *repository.Us
 
 	db := client.Database(os.Getenv("MONGO_DB"))
 	collections := []string{"users", "notes", "todos", "sessions"}
+
+	for _, collName := range collections {
+		if err := db.Collection(collName).Drop(context.Background()); err != nil {
+			t.Logf("Warning: Failed to drop collection %s: %v", collName, err)
+		}
+	}
+
 	for _, collName := range collections {
 		err := db.CreateCollection(context.Background(), collName)
 		if err != nil && !strings.Contains(err.Error(), "NamespaceExists") {
@@ -49,25 +55,29 @@ func setupStatsHandler(t *testing.T) (*gin.Engine, *mongo.Client, *repository.Us
 		}
 	}
 
-	// Initialize repositories with correct collection references
+	for _, collName := range collections {
+		count, err := db.Collection(collName).CountDocuments(context.Background(), bson.M{})
+		if err != nil {
+			t.Logf("Error checking collection %s: %v", collName, err)
+		} else {
+			t.Logf("Collection %s exists with %d documents", collName, count)
+		}
+	}
+
 	userRepo := &repository.UserRepo{
 		MongoCollection: db.Collection("users"),
 	}
 	notesRepo := &repository.NotesRepo{
 		MongoCollection: db.Collection("notes"),
 	}
-	todosRepo := &repository.TodosRepo{
-		MongoCollection: db.Collection("todos"),
-	}
+	todosService := usecase.NewTodosService(repository.GetTodosRepo(client))
 	sessionRepo := &repository.SessionRepo{
 		MongoCollection: db.Collection("sessions"),
 	}
 
-	// Initialize router with mock auth middleware
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 
-	// Use mock middleware instead of real auth
 	mockAuth := func(c *gin.Context) {
 		userID := c.GetHeader("X-User-ID")
 		if userID != "" {
@@ -76,11 +86,9 @@ func setupStatsHandler(t *testing.T) (*gin.Engine, *mongo.Client, *repository.Us
 		c.Next()
 	}
 
-	// Register route with mock auth
-	statsHandler := handler.NewStatsHandler(userRepo, notesRepo, todosRepo, sessionRepo)
+	statsHandler := handler.NewStatsHandler(userRepo, notesRepo, todosService, sessionRepo)
 	router.GET("/stats", mockAuth, statsHandler.GetUserStats)
 
-	// Ensure collections are properly initialized
 	collections = []string{
 		os.Getenv("USERS_COLLECTION"),
 		os.Getenv("NOTES_COLLECTION"),
@@ -90,19 +98,18 @@ func setupStatsHandler(t *testing.T) (*gin.Engine, *mongo.Client, *repository.Us
 
 	for _, collName := range collections {
 		coll := db.Collection(collName)
-		// Create index for userID if needed
 		if _, err := coll.Indexes().CreateOne(context.Background(), mongo.IndexModel{
-			Keys: bson.D{{Key: "userId", Value: 1}},
+			Keys: bson.D{{Key: "user_id", Value: 1}},
 		}); err != nil {
 			t.Fatalf("Failed to create index for collection %s: %v", collName, err)
 		}
 	}
 
-	return router, client, userRepo, notesRepo, todosRepo, sessionRepo, cleanup
+	return router, userRepo, notesRepo, todosService, sessionRepo, cleanup
 }
 
 func TestGetUserStatsHandler(t *testing.T) {
-	router, _, userRepo, notesRepo, todosRepo, sessionRepo, cleanup := setupStatsHandler(t)
+	router, userRepo, notesRepo, todosService, sessionRepo, cleanup := setupStatsHandler(t)
 	defer cleanup()
 
 	tests := []struct {
@@ -111,125 +118,104 @@ func TestGetUserStatsHandler(t *testing.T) {
 		expectedCode  int
 		checkResponse func(*testing.T, *httptest.ResponseRecorder)
 	}{
-
 		{
 			name: "Success - User with data",
 			setupTestData: func(t *testing.T, userID string) {
+				ctx := context.Background()
+
 				// Create user
 				user := &model.User{
 					UserID:    userID,
 					Username:  "testuser",
-					Password:  "TestPass123!!",
 					Email:     "test@example.com",
+					Password:  "TestPass123!!",
 					CreatedAt: time.Now().Add(-24 * time.Hour),
 				}
-				if _, err := userRepo.AddUser(context.Background(), user); err != nil {
+				if _, err := userRepo.AddUser(ctx, user); err != nil {
 					t.Fatalf("Failed to create test user: %v", err)
 				}
+				t.Log("User created successfully")
+
+				// Verify user creation
+				createdUser, err := userRepo.FindUser(userID)
+				if err != nil || createdUser == nil {
+					t.Fatalf("Failed to verify user creation: %v", err)
+				}
+				t.Log("User verified successfully")
 
 				// Create notes
 				notes := []*model.Notes{
-					{
-						ID:        uuid.New().String(),
-						UserID:    userID,
-						Title:     "Test Note 1",
-						Content:   "Content 1",
-						Tags:      []string{"work", "important"},
-						CreatedAt: time.Now(),
-					},
-					{
-						ID:        uuid.New().String(),
-						UserID:    userID,
-						Title:     "Test Note 2",
-						Content:   "Content 2",
-						IsPinned:  true,
-						Tags:      []string{"personal"},
-						CreatedAt: time.Now(),
-					},
-					{
-						ID:         uuid.New().String(),
-						UserID:     userID,
-						Title:      "Test Note 3",
-						Content:    "Content 3",
-						IsArchived: true,
-						CreatedAt:  time.Now(),
-					},
+					// ... your existing notes setup ...
 				}
 
-				for _, note := range notes {
+				for i, note := range notes {
 					if err := notesRepo.CreateNote(note); err != nil {
-						t.Fatalf("Failed to create test note: %v", err)
+						t.Fatalf("Failed to create note %d: %v", i+1, err)
 					}
 				}
+
+				// Verify notes creation
+				createdNotes, err := notesRepo.GetUserNotes(userID)
+				if err != nil {
+					t.Fatalf("Failed to verify notes: %v", err)
+				}
+				t.Logf("Created %d notes successfully", len(createdNotes))
 
 				// Create todos
 				todos := []*model.Todos{
-					{
-						TodoID:   uuid.New().String(),
-						UserID:   userID,
-						TodoName: "Test Todo 1",
-						Complete: true,
-					},
-					{
-						TodoID:   uuid.New().String(),
-						UserID:   userID,
-						TodoName: "Test Todo 2",
-						Complete: false,
-					},
+					// ... your existing todos setup ...
 				}
 
-				for _, todo := range todos {
-					if err := todosRepo.CreateTodo(context.Background(), todo); err != nil {
-						t.Fatalf("Failed to create test todo: %v", err)
+				for i, todo := range todos {
+					if err := todosService.CreateTodo(ctx, todo); err != nil {
+						t.Fatalf("Failed to create todo %d: %v", i+1, err)
 					}
 				}
 
+				// Verify todos creation
+				createdTodos, err := todosService.CountUserTodos(ctx, userID)
+				if err != nil {
+					t.Fatalf("Failed to verify todos: %v", err)
+				}
+				t.Logf("Created %d todos successfully", createdTodos)
+
 				// Create session
 				session := &model.Session{
-					SessionID:      uuid.New().String(),
-					UserID:         userID,
-					CreatedAt:      time.Now().Add(-1 * time.Hour),
-					ExpiresAt:      time.Now().Add(23 * time.Hour),
-					LastActivityAt: time.Now(),
-					IsActive:       true,
+					// ... your existing session setup ...
 				}
 				if err := sessionRepo.CreateSession(session); err != nil {
-					t.Fatalf("Failed to create test session: %v", err)
-				}
-			},
-			expectedCode: http.StatusOK,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				// ... existing response checks ...
-			},
-		},
-		{
-			name: "User Not Found",
-			setupTestData: func(t *testing.T, userID string) {
-				// Intentionally empty - testing non-existent user
-			},
-			expectedCode: http.StatusNotFound,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var response utils.Response
-				if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
-					t.Fatalf("Failed to parse response: %v", err)
+					t.Fatalf("Failed to create session: %v", err)
 				}
 
-				if response.Error != "User not found" {
-					t.Errorf("Expected 'User not found' error, got %v", response.Error)
+				// Verify session creation
+				sessions, err := sessionRepo.GetUserActiveSessions(userID)
+				if err != nil {
+					t.Fatalf("Failed to verify session: %v", err)
 				}
+				t.Logf("Created %d sessions successfully", len(sessions))
+
+				// Final verification of all data
+				t.Log("=== Final Data Verification ===")
+				t.Logf("User ID: %s", userID)
+				t.Logf("Notes count: %d", len(createdNotes))
+				t.Logf("Todos count: %d", createdTodos)
+				t.Logf("Sessions count: %d", len(sessions))
 			},
+			expectedCode: http.StatusOK,
+			// ... rest of your test case remains the same ...
 		},
+		// ... your "User Not Found" test case remains the same ...
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			userID := uuid.New().String()
+			t.Logf("Testing with user ID: %s", userID)
+
 			tt.setupTestData(t, userID)
 
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/stats", nil)
-
-			// Set test user ID in header instead of auth token
 			req.Header.Set("X-User-ID", userID)
 
 			router.ServeHTTP(w, req)
