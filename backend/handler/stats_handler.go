@@ -31,6 +31,7 @@ func NewStatsHandler(
 }
 
 func (h *StatsHandler) GetUserStats(c *gin.Context) {
+	ctx := c.Request.Context()
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing or invalid token")
@@ -82,7 +83,7 @@ func (h *StatsHandler) GetUserStats(c *gin.Context) {
 	}
 	stats.NotesStats.TagCounts = tagCounts
 
-	totalTodos, err := h.todoRepo.CountUserTodos(userID.(string))
+	totalTodos, err := h.todoRepo.CountAllTodos(ctx, userID.(string))
 	if err != nil {
 		log.Printf("Error counting todos: %v", err)
 		utils.InternalError(c, "Failed to count todos")
@@ -90,21 +91,21 @@ func (h *StatsHandler) GetUserStats(c *gin.Context) {
 	}
 	stats.TodoStats.Total = totalTodos
 
-	completedTodos, err := h.todoRepo.GetCompletedTodos(userID.(string))
+	completedTodos, err := h.todoRepo.CompletedCount(ctx, userID.(string))
 	if err != nil {
 		log.Printf("Error getting completed todos: %v", err)
 		utils.InternalError(c, "Failed to get completed todos")
 		return
 	}
-	stats.TodoStats.Completed = len(completedTodos)
+	stats.TodoStats.Completed = completedTodos
 
-	pendingTodos, err := h.todoRepo.GetPendingTodos(userID.(string))
+	pendingTodos, err := h.todoRepo.PendingCount(ctx, userID.(string))
 	if err != nil {
 		log.Printf("Error getting pending todos: %v", err)
 		utils.InternalError(c, "Failed to get pending todos")
 		return
 	}
-	stats.TodoStats.Pending = len(pendingTodos)
+	stats.TodoStats.Pending = pendingTodos
 
 	sessions, err := h.sessionRepo.GetUserActiveSessions(userID.(string))
 	if err != nil {
