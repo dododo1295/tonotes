@@ -175,7 +175,7 @@ func setupRouter() *gin.Engine {
 	sessionRepo := repository.GetSessionRepo(utils.MongoClient)
 	notesRepo := repository.GetNotesRepo(utils.MongoClient)
 	userRepo := repository.GetUserRepo(utils.MongoClient)
-	todosRepo := repository.GetTodosRepo(utils.MongoClient)
+	todosService := usecase.NewTodosService(repository.GetTodosRepo(utils.MongoClient))
 
 	// initialize services
 	notesService := &usecase.NotesService{NotesRepo: notesRepo}
@@ -184,7 +184,7 @@ func setupRouter() *gin.Engine {
 	statsHandler := handler.NewStatsHandler(
 		userRepo,
 		notesRepo,
-		todosRepo,
+		todosService,
 		sessionRepo,
 	)
 
