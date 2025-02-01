@@ -104,6 +104,68 @@ func (svc *TodosService) SearchTodos(ctx context.Context, userID string, searchT
 	return results, nil
 }
 
+// update Todos
+func (svc *TodosService) UpdateTodo(ctx context.Context, todoID string, userID string, updates *model.Todos) error {
+	// Check if todo exists
+	existing, err := svc.repo.GetTodosByID(userID, todoID)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return errors.New("todo not found")
+	}
+
+	// Validate updated fields
+	if updates.TodoName != "" {
+		existing.TodoName = updates.TodoName
+	}
+	if updates.Description != "" {
+		existing.Description = updates.Description
+	}
+
+	// Validate priority if it's being updated
+	if updates.Priority != "" {
+		if err := validatePriority(updates.Priority); err != nil {
+			return err
+		}
+		existing.Priority = updates.Priority
+	}
+
+	// Validate tags if they're being updated
+	if updates.Tags != nil {
+		validatedTags, err := svc.validateTags(updates.Tags)
+		if err != nil {
+			return err
+		}
+		existing.Tags = validatedTags
+	}
+
+	// Update timestamps and status
+	existing.UpdatedAt = time.Now()
+	existing.Complete = updates.Complete
+
+	// Validate and update dates if they're being changed
+	if !updates.DueDate.IsZero() {
+		if updates.DueDate.Before(time.Now()) {
+			return errors.New("due date cannot be in the past")
+		}
+		existing.DueDate = updates.DueDate
+	}
+
+	if !updates.ReminderAt.IsZero() {
+		if updates.ReminderAt.Before(time.Now()) {
+			return errors.New("reminder time cannot be in the past")
+		}
+		if !existing.DueDate.IsZero() && updates.ReminderAt.After(existing.DueDate) {
+			return errors.New("reminder time cannot be after due date")
+		}
+		existing.ReminderAt = updates.ReminderAt
+	}
+
+	// Update in repository
+	return svc.repo.UpdateTodo(ctx, todoID, userID, existing)
+}
+
 // Get Todos by Priority
 func (svc *TodosService) GetTodosByPriority(ctx context.Context, userID string, priority model.Priority) ([]*model.Todos, error) {
 	// Validate priority first

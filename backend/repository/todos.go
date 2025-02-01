@@ -61,6 +61,19 @@ func (r *TodosRepo) GetUserTodos(ctx context.Context, userID string) ([]*model.T
 	return todos, nil
 }
 
+func (r *TodosRepo) GetTodosByID(userID string, todoID string) (*model.Todos, error) {
+	var todo model.Todos
+	err := r.MongoCollection.FindOne(context.Background(),
+		bson.M{"_id": todoID, "user_id": userID}).Decode(&todo)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, errors.New("note not found")
+		}
+		return nil, err
+	}
+	return &todo, nil
+}
+
 func (r *TodosRepo) UpdateTodo(ctx context.Context, todoID string, userID string, updates *model.Todos) error {
 	timer := utils.TrackDBOperation("update", "todos")
 	defer timer.ObserveDuration()
