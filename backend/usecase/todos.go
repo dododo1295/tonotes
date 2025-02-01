@@ -166,6 +166,81 @@ func (svc *TodosService) UpdateTodo(ctx context.Context, todoID string, userID s
 	return svc.repo.UpdateTodo(ctx, todoID, userID, existing)
 }
 
+// Update Due Date
+func (svc *TodosService) UpdateDueDate(ctx context.Context, todoID string, userID string, newDueDate time.Time) error {
+	existing, err := svc.repo.GetTodosByID(userID, todoID)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return errors.New("todo not found")
+	}
+
+	if !newDueDate.IsZero() && newDueDate.Before(time.Now()) {
+		return errors.New("due date cannot be in the past")
+	}
+
+	if !existing.ReminderAt.IsZero() && existing.ReminderAt.After(newDueDate) {
+		return errors.New("reminder time cannot be after due date")
+	}
+
+	updates := &model.Todos{
+		DueDate:   newDueDate,
+		UpdatedAt: time.Now(),
+	}
+
+	return svc.repo.UpdateTodo(ctx, todoID, userID, updates)
+}
+
+// Update Reminder
+func (svc *TodosService) UpdateReminder(ctx context.Context, todoID string, userID string, newReminder time.Time) error {
+	existing, err := svc.repo.GetTodosByID(userID, todoID)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return errors.New("todo not found")
+	}
+
+	if !newReminder.IsZero() {
+		if newReminder.Before(time.Now()) {
+			return errors.New("reminder time cannot be in the past")
+		}
+		if !existing.DueDate.IsZero() && newReminder.After(existing.DueDate) {
+			return errors.New("reminder time cannot be after due date")
+		}
+	}
+
+	updates := &model.Todos{
+		ReminderAt: newReminder,
+		UpdatedAt:  time.Now(),
+	}
+
+	return svc.repo.UpdateTodo(ctx, todoID, userID, updates)
+}
+
+// Update Priority
+func (svc *TodosService) UpdatePriority(ctx context.Context, todoID string, userID string, newPriority model.Priority) error {
+	existing, err := svc.repo.GetTodosByID(userID, todoID)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return errors.New("todo not found")
+	}
+
+	if err := validatePriority(newPriority); err != nil {
+		return err
+	}
+
+	updates := &model.Todos{
+		Priority:  newPriority,
+		UpdatedAt: time.Now(),
+	}
+
+	return svc.repo.UpdateTodo(ctx, todoID, userID, updates)
+}
+
 // Get Todos by Priority
 func (svc *TodosService) GetTodosByPriority(ctx context.Context, userID string, priority model.Priority) ([]*model.Todos, error) {
 	// Validate priority first
