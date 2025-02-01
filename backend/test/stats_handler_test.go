@@ -165,13 +165,13 @@ func TestGetUserStatsHandler(t *testing.T) {
 				// Create todos
 				todos := []*model.Todos{
 					{
-						ID:       uuid.New().String(),
+						TodoID:   uuid.New().String(),
 						UserID:   userID,
 						TodoName: "Test Todo 1",
 						Complete: true,
 					},
 					{
-						ID:       uuid.New().String(),
+						TodoID:   uuid.New().String(),
 						UserID:   userID,
 						TodoName: "Test Todo 2",
 						Complete: false,
@@ -179,7 +179,7 @@ func TestGetUserStatsHandler(t *testing.T) {
 				}
 
 				for _, todo := range todos {
-					if err := todosRepo.CreateTodo(todo); err != nil {
+					if err := todosRepo.CreateTodo(context.Background(), todo); err != nil {
 						t.Fatalf("Failed to create test todo: %v", err)
 					}
 				}
