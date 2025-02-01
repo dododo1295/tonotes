@@ -61,6 +61,41 @@ var (
 			},
 			Options: options.Index().SetName("user_todos_status"),
 		},
+		{
+			Keys: bson.D{
+				{Key: "user_id", Value: 1},
+				{Key: "priority", Value: 1},
+			},
+			Options: options.Index().SetName("user_todos_priority"),
+		},
+		{
+			Keys: bson.D{
+				{Key: "user_id", Value: 1},
+				{Key: "due_date", Value: 1},
+			},
+			Options: options.Index().SetName("user_todos_due_date"),
+		},
+		{
+			Keys: bson.D{
+				{Key: "user_id", Value: 1},
+				{Key: "reminder_at", Value: 1},
+			},
+			Options: options.Index().SetName("user_todos_reminder"),
+		},
+		{
+			Keys: bson.D{
+				{Key: "todo_name", Value: "text"},
+				{Key: "todo_description", Value: "text"},
+				{Key: "tags", Value: "text"},
+			},
+			Options: options.Index().
+				SetName("todos_text_search").
+				SetWeights(bson.D{
+					{Key: "todo_name", Value: 10},
+					{Key: "todo_description", Value: 5},
+					{Key: "tags", Value: 3},
+				}),
+		},
 	}
 
 	// Users indexes
