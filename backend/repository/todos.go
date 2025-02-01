@@ -26,7 +26,7 @@ func GetTodosRepo(client *mongo.Client) *TodosRepo {
 }
 
 // Add a new todo (following the model) into the database
-func (r *TodosRepo) CreateTodo(todo *model.Todos) error {
+func (r *TodosRepo) CreateTodo(ctx context.Context, todo *model.Todos) error {
 	timer := utils.TrackDBOperation("insert", "todos")
 	defer timer.ObserveDuration()
 
@@ -41,7 +41,7 @@ func (r *TodosRepo) CreateTodo(todo *model.Todos) error {
 	}
 	todo.Tags = validTags
 
-	_, err = r.MongoCollection.InsertOne(context.Background(), todo)
+	_, err = r.MongoCollection.InsertOne(ctx, todo)
 	if err != nil {
 		utils.TrackError("database", "todo_creation_failed")
 		return err
@@ -51,20 +51,20 @@ func (r *TodosRepo) CreateTodo(todo *model.Todos) error {
 }
 
 // Retrieves all todos based on the User ID
-func (r *TodosRepo) GetUserTodos(userID string) ([]*model.Todos, error) {
+func (r *TodosRepo) GetUserTodos(ctx context.Context, userID string) ([]*model.Todos, error) {
 	timer := utils.TrackDBOperation("find", "todos")
 	defer timer.ObserveDuration()
 
 	var todos []*model.Todos
-	cursor, err := r.MongoCollection.Find(context.Background(),
+	cursor, err := r.MongoCollection.Find(ctx,
 		bson.M{"user_id": userID})
 	if err != nil {
 		utils.TrackError("database", "todo_fetch_failed")
 		return nil, err
 	}
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
-	if err = cursor.All(context.Background(), &todos); err != nil {
+	if err = cursor.All(ctx, &todos); err != nil {
 		utils.TrackError("database", "todo_decode_failed")
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (r *TodosRepo) GetUserTodos(userID string) ([]*model.Todos, error) {
 }
 
 // All encompassing update for a specific todo (Name, Description, Complete status)
-func (r *TodosRepo) UpdateTodo(todoID string, userID string, updates *model.Todos) error {
+func (r *TodosRepo) UpdateTodo(ctx context.Context, todoID string, userID string, updates *model.Todos) error {
 	timer := utils.TrackDBOperation("update", "todos")
 	defer timer.ObserveDuration()
 
@@ -90,14 +90,14 @@ func (r *TodosRepo) UpdateTodo(todoID string, userID string, updates *model.Todo
 	update := bson.M{
 		"$set": bson.M{
 			"todo_name":        updates.TodoName,
-			"todo_description": updates.TodoDescription,
+			"todo_description": updates.Description,
 			"complete":         updates.Complete,
 			"updated_at":       time.Now(),
 			"tags":             updates.Tags,
 		},
 	}
 
-	result, err := r.MongoCollection.UpdateOne(context.Background(), filter, update)
+	result, err := r.MongoCollection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		utils.TrackError("database", "todo_update_failed")
 		return err
@@ -117,7 +117,7 @@ func (r *TodosRepo) UpdateTodo(todoID string, userID string, updates *model.Todo
 }
 
 // Removes a specific todo from database
-func (r *TodosRepo) DeleteTodo(todoID string, userID string) error {
+func (r *TodosRepo) DeleteTodo(ctx context.Context, todoID string, userID string) error {
 	timer := utils.TrackDBOperation("delete", "todos")
 	defer timer.ObserveDuration()
 
@@ -126,7 +126,7 @@ func (r *TodosRepo) DeleteTodo(todoID string, userID string) error {
 		"user_id": userID,
 	}
 
-	result, err := r.MongoCollection.DeleteOne(context.Background(), filter)
+	result, err := r.MongoCollection.DeleteOne(ctx, filter)
 	if err != nil {
 		utils.TrackError("database", "todo_deletion_failed")
 		return err
@@ -141,7 +141,7 @@ func (r *TodosRepo) DeleteTodo(todoID string, userID string) error {
 }
 
 // Toggles the complete status of a todo
-func (r *TodosRepo) ToggleTodoComplete(todoID string, userID string) error {
+func (r *TodosRepo) ToggleTodoComplete(ctx context.Context, todoID string, userID string) error {
 	timer := utils.TrackDBOperation("update", "todos")
 	defer timer.ObserveDuration()
 
@@ -151,7 +151,7 @@ func (r *TodosRepo) ToggleTodoComplete(todoID string, userID string) error {
 	}
 
 	var todo model.Todos
-	err := r.MongoCollection.FindOne(context.Background(), filter).Decode(&todo)
+	err := r.MongoCollection.FindOne(ctx, filter).Decode(&todo)
 	if err != nil {
 		utils.TrackError("database", "todo_not_found")
 		return err
@@ -166,7 +166,7 @@ func (r *TodosRepo) ToggleTodoComplete(todoID string, userID string) error {
 		},
 	}
 
-	result, err := r.MongoCollection.UpdateOne(context.Background(), filter, update)
+	result, err := r.MongoCollection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		utils.TrackError("database", "todo_update_failed")
 		return err
@@ -186,8 +186,8 @@ func (r *TodosRepo) ToggleTodoComplete(todoID string, userID string) error {
 }
 
 // Counts the non-sorted number of todos for a user for display in the UI
-func (r *TodosRepo) CountUserTodos(userID string) (int, error) {
-	count, err := r.MongoCollection.CountDocuments(context.Background(),
+func (r *TodosRepo) CountAllTodos(ctx context.Context, userID string) (int, error) {
+	count, err := r.MongoCollection.CountDocuments(ctx,
 		bson.M{"user_id": userID})
 	if err != nil {
 		return 0, err
@@ -196,11 +196,11 @@ func (r *TodosRepo) CountUserTodos(userID string) (int, error) {
 }
 
 // Counts the number of pending todos for a user for display in the UI
-func (r *TodosRepo) GetPendingCount(userID string) (int, error) {
+func (r *TodosRepo) PendingCount(ctx context.Context, userID string) (int, error) {
 	timer := utils.TrackDBOperation("count", "pending_todos")
 	defer timer.ObserveDuration()
 
-	count, err := r.MongoCollection.CountDocuments(context.Background(),
+	count, err := r.MongoCollection.CountDocuments(ctx,
 		bson.M{"user_id": userID, "complete": false})
 	if err != nil {
 		utils.TrackError("database", "pending_todo_count_failed")
@@ -210,11 +210,11 @@ func (r *TodosRepo) GetPendingCount(userID string) (int, error) {
 }
 
 // Counts the number of completed todos for a user for display in the UI
-func (r *TodosRepo) GetCompletedCount(userID string) (int, error) {
+func (r *TodosRepo) CompletedCount(ctx context.Context, userID string) (int, error) {
 	timer := utils.TrackDBOperation("count", "completed_todos")
 	defer timer.ObserveDuration()
 
-	count, err := r.MongoCollection.CountDocuments(context.Background(),
+	count, err := r.MongoCollection.CountDocuments(ctx,
 		bson.M{"user_id": userID, "complete": true})
 	if err != nil {
 		utils.TrackError("database", "completed_todo_count_failed")
@@ -223,40 +223,40 @@ func (r *TodosRepo) GetCompletedCount(userID string) (int, error) {
 }
 
 // Gets all completed todos for a user
-func (r *TodosRepo) GetCompletedTodos(userID string) ([]*model.Todos, error) {
+func (r *TodosRepo) GetCompletedTodos(ctx context.Context, userID string) ([]*model.Todos, error) {
 	filter := bson.M{
 		"user_id":  userID,
 		"complete": true,
 	}
 
 	var todos []*model.Todos
-	cursor, err := r.MongoCollection.Find(context.Background(), filter)
+	cursor, err := r.MongoCollection.Find(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
-	if err = cursor.All(context.Background(), &todos); err != nil {
+	if err = cursor.All(ctx, &todos); err != nil {
 		return nil, err
 	}
 	return todos, nil
 }
 
 // Gets all pending todos for a user
-func (r *TodosRepo) GetPendingTodos(userID string) ([]*model.Todos, error) {
+func (r *TodosRepo) GetPendingTodos(ctx context.Context, userID string) ([]*model.Todos, error) {
 	filter := bson.M{
 		"user_id":  userID,
 		"complete": false,
 	}
 
 	var todos []*model.Todos
-	cursor, err := r.MongoCollection.Find(context.Background(), filter)
+	cursor, err := r.MongoCollection.Find(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
-	if err = cursor.All(context.Background(), &todos); err != nil {
+	if err = cursor.All(ctx, &todos); err != nil {
 		return nil, err
 	}
 	return todos, nil
