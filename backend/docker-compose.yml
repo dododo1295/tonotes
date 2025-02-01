@@ -11,7 +11,7 @@ services:
     restart: unless-stopped
 
   mongodb:
-    image: mongo:6.0
+    image: mongo:8.0
     container_name: mongodb
     ports:
       - "27017:27017"
@@ -21,7 +21,7 @@ services:
     volumes:
       - mongodb_data:/data/db
     restart: unless-stopped
-    command: mongod --auth
+    command: mongod
 
   redis:
     image: redis:7-alpine
