@@ -4,29 +4,30 @@ import (
 	"log"
 	"main/model"
 	"main/repository"
+	"main/usecase"
 	"main/utils"
 
 	"github.com/gin-gonic/gin"
 )
 
 type StatsHandler struct {
-	userRepo    *repository.UserRepo
-	notesRepo   *repository.NotesRepo
-	todoRepo    *repository.TodosRepo
-	sessionRepo *repository.SessionRepo
+	userRepo     *repository.UserRepo
+	notesRepo    *repository.NotesRepo
+	todosService *usecase.TodosService // Changed from TodosRepo to TodosService
+	sessionRepo  *repository.SessionRepo
 }
 
 func NewStatsHandler(
 	userRepo *repository.UserRepo,
 	notesRepo *repository.NotesRepo,
-	todoRepo *repository.TodosRepo,
+	todosService *usecase.TodosService,
 	sessionRepo *repository.SessionRepo,
 ) *StatsHandler {
 	return &StatsHandler{
-		userRepo:    userRepo,
-		notesRepo:   notesRepo,
-		todoRepo:    todoRepo,
-		sessionRepo: sessionRepo,
+		userRepo:     userRepo,
+		notesRepo:    notesRepo,
+		todosService: todosService,
+		sessionRepo:  sessionRepo,
 	}
 }
 
@@ -51,6 +52,7 @@ func (h *StatsHandler) GetUserStats(c *gin.Context) {
 
 	var stats model.UserStats
 
+	// Notes stats
 	totalNotes, err := h.notesRepo.CountUserNotes(userID.(string))
 	if err != nil {
 		log.Printf("Error counting notes: %v", err)
@@ -83,30 +85,27 @@ func (h *StatsHandler) GetUserStats(c *gin.Context) {
 	}
 	stats.NotesStats.TagCounts = tagCounts
 
-	totalTodos, err := h.todoRepo.CountAllTodos(ctx, userID.(string))
-	if err != nil {
-		log.Printf("Error counting todos: %v", err)
-		utils.InternalError(c, "Failed to count todos")
-		return
-	}
-	stats.TodoStats.Total = totalTodos
-
-	completedTodos, err := h.todoRepo.CompletedCount(ctx, userID.(string))
+	// Todos stats
+	completedTodos, err := h.todosService.GetCompletedTodos(ctx, userID.(string))
 	if err != nil {
 		log.Printf("Error getting completed todos: %v", err)
 		utils.InternalError(c, "Failed to get completed todos")
 		return
 	}
-	stats.TodoStats.Completed = completedTodos
+	stats.TodoStats.Completed = len(completedTodos)
 
-	pendingTodos, err := h.todoRepo.PendingCount(ctx, userID.(string))
+	pendingTodos, err := h.todosService.GetPendingTodos(ctx, userID.(string))
 	if err != nil {
 		log.Printf("Error getting pending todos: %v", err)
 		utils.InternalError(c, "Failed to get pending todos")
 		return
 	}
-	stats.TodoStats.Pending = pendingTodos
+	stats.TodoStats.Pending = len(pendingTodos)
 
+	// Calculate total todos from completed and pending
+	stats.TodoStats.Total = stats.TodoStats.Completed + stats.TodoStats.Pending
+
+	// Sessions and activity stats
 	sessions, err := h.sessionRepo.GetUserActiveSessions(userID.(string))
 	if err != nil {
 		log.Printf("Error getting sessions: %v", err)
