@@ -30,22 +30,37 @@ type MongoConfig struct {
 	MaxConnIdleTime time.Duration
 	RetryWrites     bool
 	Database        string
+	Username        string
+	Password        string
 }
 
 // getMongoConfig loads MongoDB configuration from environment variables
 func getMongoConfig() MongoConfig {
-	dbName := "tonotes"
-	if os.Getenv("GO_ENV") == "test" {
-		dbName = "tonotes_test"
+	// Load .env file if not in test environment
+	if os.Getenv("GO_ENV") != "test" {
+		if err := godotenv.Load(); err != nil {
+			log.Printf("Warning: Error loading .env file: %v", err)
+		}
+	}
+
+	username := os.Getenv("MONGO_USERNAME")
+	password := os.Getenv("MONGO_PASSWORD")
+
+	// Build URI with authentication if credentials are provided
+	uri := os.Getenv("MONGO_URI")
+	if uri == "" && username != "" && password != "" {
+		uri = fmt.Sprintf("mongodb://%s:%s@localhost:27017", username, password)
 	}
 
 	return MongoConfig{
-		URI:             GetEnvAsString("MONGO_URI", "mongodb://localhost:27017"),
+		URI:             uri,
 		MaxPoolSize:     GetEnvAsUint64("MONGO_MAX_POOL_SIZE", 100),
 		MinPoolSize:     GetEnvAsUint64("MONGO_MIN_POOL_SIZE", 10),
 		MaxConnIdleTime: time.Duration(GetEnvAsInt("MONGO_MAX_CONN_IDLE_TIME", 60)) * time.Second,
 		RetryWrites:     GetEnvAsBool("MONGO_RETRY_WRITES", true),
-		Database:        GetEnvAsString("MONGO_DB", dbName),
+		Database:        GetEnvAsString("MONGO_DB", "tonotes"),
+		Username:        username,
+		Password:        password,
 	}
 }
 
@@ -60,7 +75,6 @@ func InitMongoClient() error {
 
 // initClient handles the actual MongoDB client initialization
 func initClient() error {
-	// Only try to load .env if not in test mode
 	if os.Getenv("GO_ENV") != "test" {
 		if err := godotenv.Load(); err != nil {
 			log.Fatal("Error loading .env file")
@@ -75,7 +89,6 @@ func initClient() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Configure client options
 	clientOptions := options.Client().
 		ApplyURI(config.URI).
 		SetMaxPoolSize(config.MaxPoolSize).
@@ -83,7 +96,14 @@ func initClient() error {
 		SetMaxConnIdleTime(config.MaxConnIdleTime).
 		SetRetryWrites(config.RetryWrites)
 
-	// Add connection monitoring
+	// Set auth credentials if available
+	if config.Username != "" && config.Password != "" {
+		clientOptions.SetAuth(options.Credential{
+			Username: config.Username,
+			Password: config.Password,
+		})
+	}
+
 	clientOptions.SetPoolMonitor(&event.PoolMonitor{
 		Event: func(evt *event.PoolEvent) {
 			switch evt.Type {
@@ -99,13 +119,11 @@ func initClient() error {
 		},
 	})
 
-	// Connect to MongoDB
 	client, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
 		return fmt.Errorf("failed to connect to MongoDB: %w", err)
 	}
 
-	// Verify connection
 	if err := client.Ping(ctx, readpref.Primary()); err != nil {
 		return fmt.Errorf("failed to ping MongoDB: %w", err)
 	}
@@ -146,7 +164,6 @@ func CloseMongoConnection() error {
 }
 
 func init() {
-	// Only initialize if not in test mode
 	if os.Getenv("GO_ENV") != "test" {
 		if err := InitMongoClient(); err != nil {
 			log.Fatal("Failed to initialize MongoDB client:", err)
