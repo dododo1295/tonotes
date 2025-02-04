@@ -215,96 +215,141 @@ func setupRouter() *gin.Engine {
 	})
 
 	// Set up routes
-	setupRoutes(router, sessionRepo, notesService, statsHandler)
+	setupRoutes(router, sessionRepo, notesService, statsHandler, todosService)
 
 	return router
 }
 
-func setupRoutes(router *gin.Engine, sessionRepo *repository.SessionRepo, notesService *usecase.NotesService, statsHandler *handler.StatsHandler) {
+func setupRoutes(
+	router *gin.Engine,
+	sessionRepo *repository.SessionRepo,
+	notesService *usecase.NotesService,
+	statsHandler *handler.StatsHandler,
+	todosService *usecase.TodosService,
+) {
+	// Initialize handlers
+	notesHandler := handler.NewNotesHandler(notesService)
+	todosHandler := handler.NewTodosHandler(todosService)
 
-	// Auth routes
-	router.POST("/register", handler.RegistrationHandler)
-	router.POST("/login", func(c *gin.Context) {
-		handler.LoginHandler(c, sessionRepo)
-	})
-	router.POST("/logout", func(c *gin.Context) {
-		handler.LogoutHandler(c, sessionRepo)
-	})
-	router.POST("/token/refresh", handler.RefreshTokenHandler)
+	// Public routes
+	auth := router.Group("")
+	{
+		auth.POST("/register", handler.RegistrationHandler)
+		auth.POST("/login", func(c *gin.Context) {
+			handler.LoginHandler(c, sessionRepo)
+		})
+		auth.POST("/logout", func(c *gin.Context) {
+			handler.LogoutHandler(c, sessionRepo)
+		})
+		auth.POST("/token/refresh", handler.RefreshTokenHandler)
+	}
 
-	// Protected routes group
+	// Protected routes
 	protected := router.Group("")
 	protected.Use(
 		middleware.AuthMiddleware(),
-		func(c *gin.Context) {
-			middleware.SessionMiddleware(sessionRepo)(c)
-		},
+		middleware.SessionMiddleware(sessionRepo),
 	)
 
-	// User management
-	protected.PUT("/user/email", handler.ChangeEmailHandler)
-	protected.PUT("/user/password", handler.ChangePasswordHandler)
-	protected.DELETE("/user", handler.DeleteUserHandler)
-	protected.GET("/user/profile", handler.GetUserProfileHandler)
+	// User routes
+	user := protected.Group("/user")
+	{
+		user.PUT("/email", handler.ChangeEmailHandler)
+		user.PUT("/password", handler.ChangePasswordHandler)
+		user.DELETE("", handler.DeleteUserHandler)
+		user.GET("/profile", handler.GetUserProfileHandler)
+	}
 
-	// Session management
-	protected.GET("/sessions", func(c *gin.Context) {
-		handler.GetActiveSessions(c, sessionRepo)
-	})
-	protected.POST("/sessions/logout-all", func(c *gin.Context) {
-		handler.LogoutAllSessions(c, sessionRepo)
-	})
-	protected.POST("/sessions/:session_id/logout", func(c *gin.Context) {
-		handler.LogoutSession(c, sessionRepo)
-	})
-	protected.GET("/sessions/:session_id", func(c *gin.Context) {
-		handler.GetSessionDetails(c, sessionRepo)
-	})
+	// Session routes
+	sessions := protected.Group("/sessions")
+	{
+		sessions.GET("", func(c *gin.Context) {
+			handler.GetActiveSessions(c, sessionRepo)
+		})
+		sessions.POST("/logout-all", func(c *gin.Context) {
+			handler.LogoutAllSessions(c, sessionRepo)
+		})
+		sessions.POST("/:session_id/logout", func(c *gin.Context) {
+			handler.LogoutSession(c, sessionRepo)
+		})
+		sessions.GET("/:session_id", func(c *gin.Context) {
+			handler.GetSessionDetails(c, sessionRepo)
+		})
+	}
 
 	// Stats routes
-	protected.GET("/stats", statsHandler.GetUserStats)
+	stats := protected.Group("/stats")
+	{
+		stats.GET("", statsHandler.GetUserStats)
+	}
 
 	// 2FA routes
-	protected.POST("/2fa/enable", handler.Enable2FAHandler)
-	protected.POST("/2fa/verify", handler.Verify2FAHandler)
-	protected.POST("/2fa/disable", handler.Disable2FAHandler)
-	protected.POST("/2fa/recovery", handler.UseRecoveryCodeHandler)
-	protected.GET("/2fa/setup", handler.Generate2FASecretHandler)
+	twoFA := protected.Group("/2fa")
+	{
+		twoFA.POST("/enable", handler.Enable2FAHandler)
+		twoFA.POST("/verify", handler.Verify2FAHandler)
+		twoFA.POST("/disable", handler.Disable2FAHandler)
+		twoFA.POST("/recovery", handler.UseRecoveryCodeHandler)
+		twoFA.GET("/setup", handler.Generate2FASecretHandler)
+	}
 
 	// Notes routes
-	protected.GET("/notes", func(c *gin.Context) {
-		handler.SearchNotesHandler(c, notesService)
-	})
-	protected.POST("/notes", func(c *gin.Context) {
-		handler.CreateNoteHandler(c, notesService)
-	})
-	protected.PUT("/notes/:id", func(c *gin.Context) {
-		handler.UpdateNoteHandler(c, notesService)
-	})
-	protected.DELETE("/notes/:id", func(c *gin.Context) {
-		handler.DeleteNoteHandler(c, notesService)
-	})
-	protected.POST("/notes/:id/favorite", func(c *gin.Context) {
-		handler.ToggleFavoriteHandler(c, notesService)
-	})
-	protected.POST("/notes/:id/pin", func(c *gin.Context) {
-		handler.TogglePinHandler(c, notesService)
-	})
-	protected.POST("/notes/:id/archive", func(c *gin.Context) {
-		handler.ArchiveNoteHandler(c, notesService)
-	})
-	protected.GET("/notes/tags", func(c *gin.Context) {
-		handler.GetUserTagsHandler(c, notesService)
-	})
-	protected.GET("/notes/suggestions", func(c *gin.Context) {
-		handler.GetSearchSuggestionsHandler(c, notesService)
-	})
-	protected.GET("/notes/archived", func(c *gin.Context) {
-		handler.GetArchivedNotesHandler(c, notesService)
-	})
-	protected.PUT("/notes/:id/pin-position", func(c *gin.Context) {
-		handler.UpdatePinPositionHandler(c, notesService)
-	})
+	notes := protected.Group("/notes")
+	{
+		// Basic CRUD
+		notes.GET("", notesHandler.SearchNotes)
+		notes.POST("", notesHandler.CreateNote)
+		notes.PUT("/:id", notesHandler.UpdateNote)
+		notes.DELETE("/:id", notesHandler.DeleteNote)
+
+		// Note actions
+		notes.POST("/:id/favorite", notesHandler.ToggleFavorite)
+		notes.POST("/:id/pin", notesHandler.TogglePin)
+		notes.POST("/:id/archive", notesHandler.ArchiveNote)
+		notes.PUT("/:id/pin-position", notesHandler.UpdatePinPosition)
+
+		// Note queries
+		notes.GET("/tags", notesHandler.GetUserTags)
+		notes.GET("/suggestions", notesHandler.GetSearchSuggestions)
+		notes.GET("/archived", notesHandler.GetArchivedNotes)
+	}
+
+	// Todos routes
+	todos := protected.Group("/todos")
+	{
+		// Create and List
+		todos.POST("", todosHandler.CreateTodo)
+		todos.GET("", todosHandler.GetUserTodos)
+
+		// Basic CRUD operations
+		todos.PUT("/:id", todosHandler.UpdateTodo)
+		todos.DELETE("/:id", todosHandler.DeleteTodo)
+
+		// Status updates
+		todos.POST("/:id/complete", todosHandler.ToggleTodoComplete)
+
+		// Field updates
+		todos.PUT("/:id/due-date", todosHandler.UpdateDueDate)
+		todos.PUT("/:id/reminder", todosHandler.UpdateReminder)
+		todos.PUT("/:id/priority", todosHandler.UpdatePriority)
+		todos.PUT("/:id/tags", todosHandler.UpdateTags)
+		todos.PUT("/:id/recurring", todosHandler.UpdateToRecurring)
+
+		// Filtered views
+		todos.GET("/search", todosHandler.SearchTodos)
+		todos.GET("/priority", todosHandler.GetTodosByPriority)
+		todos.GET("/tags", todosHandler.GetTodosByTags)
+		todos.GET("/upcoming", todosHandler.GetUpcomingTodos)
+		todos.GET("/overdue", todosHandler.GetOverdueTodos)
+		todos.GET("/completed", todosHandler.GetCompletedTodos)
+		todos.GET("/pending", todosHandler.GetPendingTodos)
+		todos.GET("/with-reminders", todosHandler.GetTodosWithReminders)
+
+		// Metadata
+		todos.GET("/user-tags", todosHandler.GetUserTags)
+		todos.GET("/stats", todosHandler.GetTodoStats)
+		todos.GET("/count", todosHandler.CountUserTodos)
+	}
 }
 
 func main() {
