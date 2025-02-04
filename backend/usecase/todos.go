@@ -5,6 +5,7 @@ import (
 	"errors"
 	"main/model"
 	"main/repository"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +18,46 @@ type TodosService struct {
 
 func NewTodosService(repo *repository.TodosRepo) *TodosService {
 	return &TodosService{repo: repo}
+}
+
+// Get the user's todos
+func (svc *TodosService) GetUserTodos(ctx context.Context, userID string) ([]*model.Todos, error) {
+	todos, err := svc.repo.GetUserTodos(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sort todos by priority and due date
+	sort.Slice(todos, func(i, j int) bool {
+		// First sort by completion status (incomplete first)
+		if todos[i].Complete != todos[j].Complete {
+			return !todos[i].Complete
+		}
+
+		// Then by overdue status for incomplete todos
+		if !todos[i].Complete && !todos[j].Complete {
+			iOverdue := !todos[i].DueDate.IsZero() && todos[i].DueDate.Before(time.Now())
+			jOverdue := !todos[j].DueDate.IsZero() && todos[j].DueDate.Before(time.Now())
+			if iOverdue != jOverdue {
+				return iOverdue // Show overdue items first
+			}
+		}
+
+		// Then by priority
+		if todos[i].Priority != todos[j].Priority {
+			return getPriorityWeight(todos[i].Priority) > getPriorityWeight(todos[j].Priority)
+		}
+
+		// Then by due date (if exists)
+		if !todos[i].DueDate.IsZero() && !todos[j].DueDate.IsZero() {
+			return todos[i].DueDate.Before(todos[j].DueDate)
+		}
+
+		// Finally by creation date
+		return todos[i].CreatedAt.Before(todos[j].CreatedAt)
+	})
+
+	return todos, nil
 }
 
 // Create Todo
@@ -62,9 +103,41 @@ func (svc *TodosService) CreateTodo(ctx context.Context, todo *model.Todos) erro
 		}
 	}
 
-	todo.Complete = false
+	if todo.IsRecurring {
+		switch todo.RecurrencePattern {
+		case model.RecurrenceDaily, model.RecurrenceWeekly, model.RecurrenceMonthly, model.RecurrenceYearly:
+		default:
+			return errors.New("invalid recurrence pattern")
+		}
+
+		if todo.DueDate.IsZero() {
+			return errors.New("due date is required for recurring todos")
+		}
+	}
+
+	if !todo.Complete {
+		todo.Complete = false
+	}
 
 	return svc.repo.CreateTodo(ctx, todo)
+}
+
+// Delete todos
+func (svc *TodosService) DeleteTodo(ctx context.Context, todoID string, userID string) error {
+	// Verify todo exists and belongs to user
+	existing, err := svc.repo.GetTodosByID(userID, todoID)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return errors.New("todo not found")
+	}
+
+	if existing.Complete && existing.DueDate.After(time.Now()) {
+		return errors.New("cannot delete completed todo with future due date")
+	}
+
+	return svc.repo.DeleteTodo(ctx, todoID, userID)
 }
 
 // Get Todos Count
@@ -105,14 +178,14 @@ func (svc *TodosService) SearchTodos(ctx context.Context, userID string, searchT
 }
 
 // update Todos
-func (svc *TodosService) UpdateTodo(ctx context.Context, todoID string, userID string, updates *model.Todos) error {
+func (svc *TodosService) UpdateTodo(ctx context.Context, todoID string, userID string, updates *model.Todos) (*model.Todos, error) {
 	// Check if todo exists
 	existing, err := svc.repo.GetTodosByID(userID, todoID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if existing == nil {
-		return errors.New("todo not found")
+		return nil, errors.New("todo not found")
 	}
 
 	// Validate updated fields
@@ -126,7 +199,7 @@ func (svc *TodosService) UpdateTodo(ctx context.Context, todoID string, userID s
 	// Validate priority if it's being updated
 	if updates.Priority != "" {
 		if err := validatePriority(updates.Priority); err != nil {
-			return err
+			return nil, err
 		}
 		existing.Priority = updates.Priority
 	}
@@ -135,7 +208,7 @@ func (svc *TodosService) UpdateTodo(ctx context.Context, todoID string, userID s
 	if updates.Tags != nil {
 		validatedTags, err := svc.validateTags(updates.Tags)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		existing.Tags = validatedTags
 	}
@@ -147,98 +220,141 @@ func (svc *TodosService) UpdateTodo(ctx context.Context, todoID string, userID s
 	// Validate and update dates if they're being changed
 	if !updates.DueDate.IsZero() {
 		if updates.DueDate.Before(time.Now()) {
-			return errors.New("due date cannot be in the past")
+			return nil, errors.New("due date cannot be in the past")
 		}
 		existing.DueDate = updates.DueDate
 	}
 
 	if !updates.ReminderAt.IsZero() {
 		if updates.ReminderAt.Before(time.Now()) {
-			return errors.New("reminder time cannot be in the past")
+			return nil, errors.New("reminder time cannot be in the past")
 		}
 		if !existing.DueDate.IsZero() && updates.ReminderAt.After(existing.DueDate) {
-			return errors.New("reminder time cannot be after due date")
+			return nil, errors.New("reminder time cannot be after due date")
 		}
 		existing.ReminderAt = updates.ReminderAt
 	}
 
 	// Update in repository
-	return svc.repo.UpdateTodo(ctx, todoID, userID, existing)
+	if err := svc.repo.UpdateTodo(ctx, todoID, userID, existing); err != nil {
+		return nil, err
+	}
+
+	return existing, nil
 }
 
 // Update Due Date
-func (svc *TodosService) UpdateDueDate(ctx context.Context, todoID string, userID string, newDueDate time.Time) error {
+func (svc *TodosService) UpdateDueDate(ctx context.Context, todoID string, userID string, newDueDate time.Time) (*model.Todos, error) {
 	existing, err := svc.repo.GetTodosByID(userID, todoID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if existing == nil {
-		return errors.New("todo not found")
+		return nil, errors.New("todo not found")
 	}
 
 	if !newDueDate.IsZero() && newDueDate.Before(time.Now()) {
-		return errors.New("due date cannot be in the past")
+		return nil, errors.New("due date cannot be in the past")
 	}
 
 	if !existing.ReminderAt.IsZero() && existing.ReminderAt.After(newDueDate) {
-		return errors.New("reminder time cannot be after due date")
+		return nil, errors.New("reminder time cannot be after due date")
 	}
 
-	updates := &model.Todos{
-		DueDate:   newDueDate,
-		UpdatedAt: time.Now(),
+	existing.DueDate = newDueDate
+	existing.UpdatedAt = time.Now()
+
+	if err := svc.repo.UpdateTodo(ctx, todoID, userID, existing); err != nil {
+		return nil, err
 	}
 
-	return svc.repo.UpdateTodo(ctx, todoID, userID, updates)
+	return existing, nil
 }
 
 // Update Reminder
-func (svc *TodosService) UpdateReminder(ctx context.Context, todoID string, userID string, newReminder time.Time) error {
+func (svc *TodosService) UpdateReminder(ctx context.Context, todoID string, userID string, newReminder time.Time) (*model.Todos, error) {
 	existing, err := svc.repo.GetTodosByID(userID, todoID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if existing == nil {
-		return errors.New("todo not found")
+		return nil, errors.New("todo not found")
 	}
 
 	if !newReminder.IsZero() {
 		if newReminder.Before(time.Now()) {
-			return errors.New("reminder time cannot be in the past")
+			return nil, errors.New("reminder time cannot be in the past")
 		}
 		if !existing.DueDate.IsZero() && newReminder.After(existing.DueDate) {
-			return errors.New("reminder time cannot be after due date")
+			return nil, errors.New("reminder time cannot be after due date")
 		}
 	}
 
-	updates := &model.Todos{
-		ReminderAt: newReminder,
-		UpdatedAt:  time.Now(),
+	existing.ReminderAt = newReminder
+	existing.UpdatedAt = time.Now()
+
+	if err := svc.repo.UpdateTodo(ctx, todoID, userID, existing); err != nil {
+		return nil, err
 	}
 
-	return svc.repo.UpdateTodo(ctx, todoID, userID, updates)
+	return existing, nil
 }
 
 // Update Priority
-func (svc *TodosService) UpdatePriority(ctx context.Context, todoID string, userID string, newPriority model.Priority) error {
+func (svc *TodosService) UpdatePriority(ctx context.Context, todoID string, userID string, newPriority model.Priority) (*model.Todos, error) {
 	existing, err := svc.repo.GetTodosByID(userID, todoID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if existing == nil {
-		return errors.New("todo not found")
+		return nil, errors.New("todo not found")
 	}
 
 	if err := validatePriority(newPriority); err != nil {
-		return err
+		return nil, err
 	}
 
-	updates := &model.Todos{
-		Priority:  newPriority,
-		UpdatedAt: time.Now(),
+	existing.Priority = newPriority
+	existing.UpdatedAt = time.Now()
+
+	if err := svc.repo.UpdateTodo(ctx, todoID, userID, existing); err != nil {
+		return nil, err
 	}
 
-	return svc.repo.UpdateTodo(ctx, todoID, userID, updates)
+	return existing, nil
+}
+
+// Update Recurrence
+func (svc *TodosService) UpdateToRecurring(ctx context.Context, todoID string, userID string, pattern model.RecurrencePattern, endDate time.Time) (*model.Todos, error) {
+	existing, err := svc.repo.GetTodosByID(userID, todoID)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, errors.New("todo not found")
+	}
+
+	if existing.DueDate.IsZero() {
+		return nil, errors.New("cannot make todo recurring without due date")
+	}
+
+	// Validate recurrence pattern
+	switch pattern {
+	case model.RecurrenceDaily, model.RecurrenceWeekly, model.RecurrenceMonthly, model.RecurrenceYearly:
+	default:
+		return nil, errors.New("invalid recurrence pattern")
+	}
+
+	existing.IsRecurring = true
+	existing.RecurrencePattern = pattern
+	existing.RecurrenceEndDate = endDate
+	existing.UpdatedAt = time.Now()
+
+	if err := svc.repo.UpdateTodo(ctx, todoID, userID, existing); err != nil {
+		return nil, err
+	}
+
+	return existing, nil
 }
 
 // Get Todos by Priority
@@ -321,6 +437,10 @@ func (svc *TodosService) GetUserTags(ctx context.Context, userID string) ([]stri
 
 // Get Upcoming Todos
 func (svc *TodosService) GetUpcomingTodos(ctx context.Context, userID string, days int) ([]*model.Todos, error) {
+	if days <= 0 {
+		return nil, errors.New("days must be positive")
+	}
+
 	todos, err := svc.repo.GetUserTodos(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -331,12 +451,37 @@ func (svc *TodosService) GetUpcomingTodos(ctx context.Context, userID string, da
 
 	var upcomingTodos []*model.Todos
 	for _, todo := range todos {
-		if !todo.Complete && todo.DueDate.After(now) && todo.DueDate.Before(deadline) {
+		if !todo.Complete && !todo.DueDate.IsZero() && todo.DueDate.After(now) && todo.DueDate.Before(deadline) {
 			upcomingTodos = append(upcomingTodos, todo)
 		}
 	}
 
 	return upcomingTodos, nil
+}
+
+// Updat Tags in Todos
+func (svc *TodosService) UpdateTags(ctx context.Context, todoID string, userID string, newTags []string) (*model.Todos, error) {
+	existing, err := svc.repo.GetTodosByID(userID, todoID)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, errors.New("todo not found")
+	}
+
+	validatedTags, err := svc.validateTags(newTags)
+	if err != nil {
+		return nil, err
+	}
+
+	existing.Tags = validatedTags
+	existing.UpdatedAt = time.Now()
+
+	if err := svc.repo.UpdateTodo(ctx, todoID, userID, existing); err != nil {
+		return nil, err
+	}
+
+	return existing, nil
 }
 
 // Get Overdue Todos
@@ -376,31 +521,26 @@ func (svc *TodosService) GetTodosWithReminders(ctx context.Context, userID strin
 }
 
 // Toggle Todo Complete Status
-func (svc *TodosService) ToggleTodoComplete(ctx context.Context, todoID string, userID string) error {
-	todos, err := svc.repo.GetUserTodos(ctx, userID)
+func (svc *TodosService) ToggleTodoComplete(ctx context.Context, todoID string, userID string) (*model.Todos, error) {
+	// Get todo
+	existing, err := svc.repo.GetTodosByID(userID, todoID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
-	var todoToUpdate *model.Todos
-	for _, todo := range todos {
-		if todo.TodoID == todoID {
-			todoToUpdate = todo
-			break
-		}
-	}
-
-	if todoToUpdate == nil {
-		return errors.New("todo not found")
+	if existing == nil {
+		return nil, errors.New("todo not found")
 	}
 
 	// Toggle complete status
-	updates := &model.Todos{
-		Complete:  !todoToUpdate.Complete,
-		UpdatedAt: time.Now(),
+	existing.Complete = !existing.Complete
+	existing.UpdatedAt = time.Now()
+
+	// Update in repository
+	if err := svc.repo.UpdateTodo(ctx, todoID, userID, existing); err != nil {
+		return nil, err
 	}
 
-	return svc.repo.UpdateTodo(ctx, todoID, userID, updates)
+	return existing, nil
 }
 
 // Get Completed Todos
@@ -435,6 +575,60 @@ func (svc *TodosService) GetPendingTodos(ctx context.Context, userID string) ([]
 	}
 
 	return pendingTodos, nil
+}
+
+// Todo Stats
+func (svc *TodosService) GetTodoStats(ctx context.Context, userID string) (*model.TodoStats, error) {
+	todos, err := svc.repo.GetUserTodos(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	stats := &model.TodoStats{
+		Total:          len(todos),
+		Completed:      0,
+		Pending:        0,
+		HighPriority:   0,
+		MediumPriority: 0,
+		LowPriority:    0,
+		Overdue:        0,
+		DueToday:       0,
+		WithReminders:  0,
+	}
+
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, now.Location())
+
+	for _, todo := range todos {
+		if todo.Complete {
+			stats.Completed++
+		} else {
+			stats.Pending++
+		}
+
+		switch todo.Priority {
+		case model.PriorityHigh:
+			stats.HighPriority++
+		case model.PriorityMedium:
+			stats.MediumPriority++
+		case model.PriorityLow:
+			stats.LowPriority++
+		}
+
+		if !todo.Complete && !todo.DueDate.IsZero() {
+			if todo.DueDate.Before(now) {
+				stats.Overdue++
+			} else if todo.DueDate.Before(today) {
+				stats.DueToday++
+			}
+		}
+
+		if !todo.ReminderAt.IsZero() {
+			stats.WithReminders++
+		}
+	}
+
+	return stats, nil
 }
 
 // helper
@@ -481,4 +675,17 @@ func containsAnyTag(todoTags []string, searchTags []string) bool {
 		}
 	}
 	return false
+}
+
+func getPriorityWeight(p model.Priority) int {
+	switch p {
+	case model.PriorityHigh:
+		return 3
+	case model.PriorityMedium:
+		return 2
+	case model.PriorityLow:
+		return 1
+	default:
+		return 0
+	}
 }
