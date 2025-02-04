@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"main/utils"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -42,7 +43,16 @@ func BlacklistTokens(accessToken, refreshToken string) error {
 	if TokenBlacklist == nil {
 		return fmt.Errorf("token blacklist not initialized")
 	}
-	return TokenBlacklist.blacklistTokens(accessToken, refreshToken)
+
+	// Add debug logging
+	fmt.Printf("BlacklistTokens called with:\nAccess Token: %s\nRefresh Token: %s\n", accessToken, refreshToken)
+
+	if err := TokenBlacklist.blacklistTokens(accessToken, refreshToken); err != nil {
+		fmt.Printf("Failed to blacklist tokens: %v\n", err)
+		return err
+	}
+
+	return nil
 }
 
 func (tb *RedisTokenBlacklist) blacklistTokens(accessToken, refreshToken string) error {
@@ -61,7 +71,7 @@ func (tb *RedisTokenBlacklist) blacklistTokens(accessToken, refreshToken string)
 
 // blacklistSingleToken adds a single token to the blacklist until its expiration
 func (tb *RedisTokenBlacklist) blacklistSingleToken(tokenString string, tokenType string) error {
-	// Parse the token to get its expiration time
+	// Parse the token
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
@@ -70,37 +80,36 @@ func (tb *RedisTokenBlacklist) blacklistSingleToken(tokenString string, tokenTyp
 	})
 
 	if err != nil {
-		return nil // Invalid token doesn't need to be blacklisted
+		// Only return error if it's not an expiration error
+		if !strings.Contains(err.Error(), "token is expired") {
+			return fmt.Errorf("failed to parse token: %v", err)
+		}
 	}
 
+	// Get claims
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return nil
+		return fmt.Errorf("failed to get claims from token")
 	}
 
-	exp, ok := claims["exp"].(float64)
-	if !ok {
-		return nil
-	}
-
-	expirationTime := time.Unix(int64(exp), 0)
-	timeUntilExpiration := time.Until(expirationTime)
-
-	// If token is already expired, no need to blacklist
-	if timeUntilExpiration <= 0 {
-		return nil
+	// Set expiration time
+	var expirationTime time.Time
+	if exp, ok := claims["exp"].(float64); ok {
+		expirationTime = time.Unix(int64(exp), 0)
+	} else {
+		// If no expiration in token, set a default
+		expirationTime = time.Now().Add(24 * time.Hour)
 	}
 
 	ctx := context.Background()
 	key := fmt.Sprintf("blacklist:%s:%s", tokenType, tokenString)
 
-	// Store token in Redis with expiration
-	err = tb.Client.Set(ctx, key, true, timeUntilExpiration).Err()
+	// Store in Redis with expiration
+	err = tb.Client.Set(ctx, key, "true", time.Until(expirationTime)).Err()
 	if err != nil {
 		return fmt.Errorf("failed to blacklist token in Redis: %v", err)
 	}
 
-	fmt.Printf("Blacklisted %s token, expires: %v\n", tokenType, expirationTime)
 	return nil
 }
 
