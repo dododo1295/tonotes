@@ -3,64 +3,78 @@ package test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"main/handler"
 	"main/model"
 	"main/repository"
+	"main/test/testutils"
 	"main/utils"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+func init() {
+	testutils.SetupTestEnvironment()
+}
+
+func setupProfileTest(t *testing.T) (*mongo.Client, func()) {
+	// Verify environment setup
+	testutils.VerifyTestEnvironment(t)
+
+	// Setup test database
+	client, cleanup := testutils.SetupTestDB(t)
+
+	// Set up collections
+	db := client.Database(os.Getenv("MONGO_DB_TEST"))
+
+	// Create users collection
+	err := db.CreateCollection(context.Background(), "users")
+	if err != nil && !strings.Contains(err.Error(), "NamespaceExists") {
+		t.Logf("Warning: Failed to create users collection: %v", err)
+	}
+
+	return client, func() {
+		t.Log("Running profile test cleanup")
+		// Drop users collection
+		if err := db.Collection("users").Drop(context.Background()); err != nil {
+			t.Logf("Warning: Failed to drop users collection: %v", err)
+		}
+		cleanup()
+	}
+}
+
 func TestGetUserProfileHandler(t *testing.T) {
-	fmt.Println("Starting TestGetUserProfileHandler")
-	t.Log("Test starting...")
+	// Setup test environment
+	client, cleanup := setupProfileTest(t)
+	defer cleanup()
 
-	envVars := map[string]string{
-		"MONGO_URI":        "mongodb://localhost:27017",
-		"MONGO_DB":         "tonotes_test",
-		"USERS_COLLECTION": "users",
-	}
+	// Set MongoDB client
+	utils.MongoClient = client
 
-	for key, value := range envVars {
-		t.Logf("Setting %s=%s", key, value)
-		os.Setenv(key, value)
-	}
+	// Get database reference
+	db := client.Database(os.Getenv("MONGO_DB_TEST"))
 
-	testClient, err := mongo.Connect(context.Background(),
-		options.Client().ApplyURI(os.Getenv("MONGO_URI")))
-	if err != nil {
-		t.Fatalf("Failed to connect to test database: %v", err)
-	}
-	defer testClient.Disconnect(context.Background())
-
-	utils.MongoClient = testClient
-
-	if err := testClient.Database("tonotes_test").Collection("users").Drop(context.Background()); err != nil {
-		t.Fatalf("Failed to clear test database: %v", err)
-	}
-
+	// Setup Gin router
 	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name          string
 		userID        string
 		expectedCode  int
-		setupMockDB   func(t *testing.T, userRepo *repository.UserRepo)
+		setupTestData func(*testing.T, *repository.UserRepo)
 		checkResponse func(*testing.T, *httptest.ResponseRecorder)
 	}{
 		{
 			name:         "Successful Profile Fetch",
 			userID:       "test-uuid",
 			expectedCode: http.StatusOK,
-			setupMockDB: func(t *testing.T, userRepo *repository.UserRepo) {
+			setupTestData: func(t *testing.T, userRepo *repository.UserRepo) {
 				testUser := model.User{
 					UserID:    "test-uuid",
 					Username:  "testuser",
@@ -73,6 +87,7 @@ func TestGetUserProfileHandler(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Failed to insert test user: %v", err)
 				}
+				t.Logf("Created test user: %+v", testUser)
 			},
 			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var response utils.Response
@@ -92,11 +107,16 @@ func TestGetUserProfileHandler(t *testing.T) {
 					return
 				}
 
-				if username, ok := profile["username"].(string); !ok || username != "testuser" {
-					t.Errorf("Expected username 'testuser', got %v", username)
+				// Verify profile fields
+				expectedFields := map[string]string{
+					"username": "testuser",
+					"email":    "test@example.com",
 				}
-				if email, ok := profile["email"].(string); !ok || email != "test@example.com" {
-					t.Errorf("Expected email 'test@example.com', got %v", email)
+
+				for field, expected := range expectedFields {
+					if value, ok := profile[field].(string); !ok || value != expected {
+						t.Errorf("Expected %s to be '%s', got '%v'", field, expected, value)
+					}
 				}
 			},
 		},
@@ -104,7 +124,9 @@ func TestGetUserProfileHandler(t *testing.T) {
 			name:         "User Not Found",
 			userID:       "nonexistent-uuid",
 			expectedCode: http.StatusNotFound,
-			setupMockDB:  func(t *testing.T, userRepo *repository.UserRepo) {},
+			setupTestData: func(t *testing.T, userRepo *repository.UserRepo) {
+				// No setup needed for non-existent user test
+			},
 			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var response utils.Response
 				err := json.Unmarshal(w.Body.Bytes(), &response)
@@ -117,31 +139,64 @@ func TestGetUserProfileHandler(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:         "Invalid User ID",
+			userID:       "",
+			expectedCode: http.StatusBadRequest,
+			setupTestData: func(t *testing.T, userRepo *repository.UserRepo) {
+				// No setup needed for invalid user ID test
+			},
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				expectedError := "Invalid user id" // Changed to match handler's response
+				if response.Error != expectedError {
+					t.Errorf("Expected error '%s', got %q", expectedError, response.Error)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := utils.MongoClient.Database("tonotes_test").Collection("users").Drop(context.Background()); err != nil {
-				t.Fatalf("Failed to clear test database: %v", err)
+			// Clear users collection before each test
+			if err := db.Collection("users").Drop(context.Background()); err != nil {
+				t.Logf("Warning: Failed to clear users collection: %v", err)
 			}
 
-			userRepo := repository.GetUserRepo(utils.MongoClient)
-			tt.setupMockDB(t, userRepo)
+			// Setup test data
+			userRepo := repository.GetUserRepo(client)
+			tt.setupTestData(t, userRepo)
 
-			w := httptest.NewRecorder()
-			req := httptest.NewRequest("GET", "/profile", nil)
+			// Create new router for each test
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				// Add logging middleware
+				t.Logf("Processing request: %s %s", c.Request.Method, c.Request.URL.Path)
+				c.Next()
+			})
 
-			// Create new router for each test case
-			r := gin.Default()
-			r.GET("/profile", func(c *gin.Context) {
+			router.GET("/profile", func(c *gin.Context) {
 				c.Set("user_id", tt.userID)
 				handler.GetUserProfileHandler(c)
 			})
 
-			// Serve request
-			r.ServeHTTP(w, req)
+			// Create request
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/profile", nil)
 
-			// Log response for debugging
+			// Log test information
+			t.Logf("Running test: %s", tt.name)
+			t.Logf("User ID: %s", tt.userID)
+
+			// Execute request
+			router.ServeHTTP(w, req)
+
+			// Log response
 			t.Logf("Response Status: %d", w.Code)
 			t.Logf("Response Body: %s", w.Body.String())
 
@@ -150,7 +205,7 @@ func TestGetUserProfileHandler(t *testing.T) {
 				t.Errorf("Expected status code %d, got %d", tt.expectedCode, w.Code)
 			}
 
-			// Run custom response checks
+			// Check response content
 			tt.checkResponse(t, w)
 		})
 	}

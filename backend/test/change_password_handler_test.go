@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"main/handler"
+	"main/test/testutils"
 
 	"main/model"
 	"main/services"
@@ -19,8 +20,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func init() {
@@ -40,17 +39,16 @@ type ChangePasswordRequest struct {
 
 func TestChangePasswordHandler(t *testing.T) {
 	// Setup test environment
-	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
-	os.Setenv("MONGO_DB", "tonotes_test")
-	os.Setenv("USERS_COLLECTION", "users")
+	testutils.SetupTestEnvironment()
+	client, cleanup := testutils.SetupTestDB(t)
+	defer cleanup()
 
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(os.Getenv("MONGO_URI")))
-	if err != nil {
-		t.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-	defer client.Disconnect(context.Background())
-
+	// Set the MongoDB client
 	utils.MongoClient = client
+
+	// Get database reference
+	db := client.Database(os.Getenv("MONGO_DB"))
+	collection := db.Collection("users")
 
 	testUserID := uuid.New().String()
 	oldPassword := "OldPass123!!"
@@ -66,12 +64,11 @@ func TestChangePasswordHandler(t *testing.T) {
 		LastPasswordChange: pastTime,
 	}
 
-	collection := client.Database("tonotes_test").Collection("users")
-	_, err = collection.InsertOne(context.Background(), testUser)
+	// Insert test user
+	_, err := collection.InsertOne(context.Background(), testUser)
 	if err != nil {
 		t.Fatalf("Failed to insert test user: %v", err)
 	}
-	defer collection.DeleteMany(context.Background(), bson.M{})
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -193,7 +190,11 @@ func TestChangePasswordHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Reset user state
+			if tt.setupFunc != nil {
+				tt.setupFunc()
+			}
+
+			// Reset user state between tests
 			_, err := collection.UpdateOne(
 				context.Background(),
 				bson.M{"user_id": testUserID},
@@ -206,18 +207,14 @@ func TestChangePasswordHandler(t *testing.T) {
 				t.Fatalf("Failed to reset user state: %v", err)
 			}
 
-			if tt.setupFunc != nil {
-				tt.setupFunc()
-			}
-
 			jsonBody, err := json.Marshal(tt.requestBody)
 			if err != nil {
 				t.Fatalf("Failed to marshal request body: %v", err)
 			}
 
-			req, _ := http.NewRequest("POST", "/change-password", bytes.NewBuffer(jsonBody))
-			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
+			req := httptest.NewRequest("POST", "/change-password", bytes.NewBuffer(jsonBody))
+			req.Header.Set("Content-Type", "application/json")
 
 			router.ServeHTTP(w, req)
 

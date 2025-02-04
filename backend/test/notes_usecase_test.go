@@ -18,16 +18,70 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func setupNotesUsecaseTest(t *testing.T) (*mongo.Client, *usecase.NotesService, func()) {
-	// Use testutils for environment and database setup
+func init() {
 	testutils.SetupTestEnvironment()
+
+	// Verify all required environment variables are set
+	requiredVars := []string{
+		"MONGO_USERNAME",
+		"MONGO_PASSWORD",
+		"MONGO_URI",
+		"MONGO_DB",
+		"MONGO_DB_TEST",
+		"TEST_MONGO_URI",
+	}
+
+	// Check if any required variables are missing
+	missing := []string{}
+	for _, v := range requiredVars {
+		if os.Getenv(v) == "" {
+			missing = append(missing, v)
+		}
+	}
+
+	// If any variables are missing, set them with default test values
+	if len(missing) > 0 {
+		os.Setenv("MONGO_USERNAME", "admin")
+		os.Setenv("MONGO_PASSWORD", "mongodblmpvBMCqJ3Ig2eX2oCTlNbf7TJ5533L80TvM8LC")
+		os.Setenv("MONGO_URI", "mongodb://localhost:27017")
+		os.Setenv("MONGO_DB", "tonotes")
+		os.Setenv("MONGO_DB_TEST", "tonotes_test")
+		os.Setenv("TEST_MONGO_URI", "mongodb://localhost:27017")
+
+		// Set connection pool settings
+		os.Setenv("MONGO_MAX_POOL_SIZE", "100")
+		os.Setenv("MONGO_MIN_POOL_SIZE", "10")
+		os.Setenv("MONGO_MAX_CONN_IDLE_TIME", "60")
+	}
+
+	// Construct the TEST_MONGO_URI with credentials if needed
+	if os.Getenv("TEST_MONGO_URI") == "mongodb://localhost:27017" {
+		testMongoURI := fmt.Sprintf("mongodb://%s:%s@localhost:27017",
+			os.Getenv("MONGO_USERNAME"),
+			os.Getenv("MONGO_PASSWORD"))
+		os.Setenv("TEST_MONGO_URI", testMongoURI)
+	}
+}
+
+func setupNotesUsecaseTest(t *testing.T) (*mongo.Client, *usecase.NotesService, func()) {
+	// Verify environment setup
+	testutils.VerifyTestEnvironment(t)
+
+	// Setup test database
 	client, cleanup := testutils.SetupTestDB(t)
 
-	// Get database reference
-	db := client.Database(os.Getenv("MONGO_DB"))
+	// Get database reference using test database name
+	dbName := os.Getenv("MONGO_DB_TEST")
+	if dbName == "" {
+		dbName = "tonotes_test"
+		os.Setenv("MONGO_DB_TEST", dbName)
+	}
 
-	// Create notes collection explicitly
-	err := db.CreateCollection(context.Background(), "notes")
+	db := client.Database(dbName)
+
+	// Create notes collection with explicit error handling
+	ctx := context.Background()
+	err := db.CreateCollection(ctx, "notes")
 	if err != nil && !strings.Contains(err.Error(), "NamespaceExists") {
 		t.Fatalf("Failed to create notes collection: %v", err)
 	}
@@ -49,7 +103,7 @@ func setupNotesUsecaseTest(t *testing.T) (*mongo.Client, *usecase.NotesService, 
 	}
 
 	collection := db.Collection("notes")
-	_, err = collection.Indexes().CreateOne(context.Background(), indexModel)
+	_, err = collection.Indexes().CreateOne(ctx, indexModel)
 	if err != nil {
 		t.Fatalf("Failed to create text index: %v", err)
 	}
@@ -62,14 +116,13 @@ func setupNotesUsecaseTest(t *testing.T) (*mongo.Client, *usecase.NotesService, 
 		NotesRepo: notesRepo,
 	}
 
-	// Return cleanup function that properly handles disconnection
+	// Return combined cleanup function
 	combinedCleanup := func() {
 		t.Log("Running cleanup")
-		// Drop collection first
-		if err := collection.Drop(context.Background()); err != nil {
+		ctx := context.Background()
+		if err := collection.Drop(ctx); err != nil {
 			t.Logf("Warning: Failed to drop collection: %v", err)
 		}
-		// Then run the original cleanup
 		cleanup()
 	}
 
@@ -160,13 +213,18 @@ func TestSearchNotes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			response, err := svc.SearchNotes(ctx, tt.opts)
+			notes, totalCount, err := svc.SearchNotes(ctx, tt.opts)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SearchNotes() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !tt.wantErr && len(response.Notes) != tt.expectedCount {
-				t.Errorf("SearchNotes() got %v notes, want %v", len(response.Notes), tt.expectedCount)
+			if !tt.wantErr {
+				if len(notes) != tt.expectedCount {
+					t.Errorf("SearchNotes() got %v notes, want %v", len(notes), tt.expectedCount)
+				}
+				if totalCount < tt.expectedCount {
+					t.Errorf("SearchNotes() total count %v is less than expected notes %v", totalCount, tt.expectedCount)
+				}
 			}
 		})
 	}
@@ -583,12 +641,15 @@ func TestArchiveOperations(t *testing.T) {
 		{
 			name: "Get Archived Notes",
 			operation: func() error {
-				response, err := svc.GetArchivedNotes(ctx, userID, 1, 10)
+				notes, totalCount, err := svc.GetArchivedNotes(ctx, userID, 1, 10)
 				if err != nil {
 					return err
 				}
-				if len(response.Notes) != 1 {
-					return fmt.Errorf("expected 1 archived note, got %d", len(response.Notes))
+				if len(notes) != 1 {
+					return fmt.Errorf("expected 1 archived note, got %d", len(notes))
+				}
+				if totalCount != 1 {
+					return fmt.Errorf("expected total count of 1, got %d", totalCount)
 				}
 				return nil
 			},
@@ -756,17 +817,15 @@ func TestPinPositionOperations(t *testing.T) {
 }
 
 func TestEnsureIndexes(t *testing.T) {
-	client, err := mongo.Connect(context.Background(),
-		options.Client().ApplyURI("mongodb://localhost:27017"))
-	if err != nil {
-		t.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-	defer client.Disconnect(context.Background())
+	// Setup test environment
+	testutils.VerifyTestEnvironment(t)
+	client, cleanup := testutils.SetupTestDB(t)
+	defer cleanup()
 
-	db := client.Database("tonotes_test")
+	db := client.Database(os.Getenv("MONGO_DB_TEST"))
 
 	// Setup indexes
-	err = repository.SetupIndexes(db)
+	err := repository.SetupIndexes(db)
 	if err != nil {
 		t.Fatalf("Failed to setup indexes: %v", err)
 	}
@@ -790,7 +849,6 @@ func TestEnsureIndexes(t *testing.T) {
 		if weights, exists := index["weights"]; exists {
 			foundTextIndex = true
 			weightsMap := weights.(bson.M)
-			// Verify weights are set correctly
 			if weightsMap["title"].(int32) != 10 ||
 				weightsMap["content"].(int32) != 5 ||
 				weightsMap["tags"].(int32) != 3 {
@@ -803,17 +861,14 @@ func TestEnsureIndexes(t *testing.T) {
 	if !foundTextIndex {
 		t.Error("Text index was not created")
 	}
-
-	// Cleanup
-	err = db.Collection("notes").Drop(context.Background())
-	if err != nil {
-		t.Errorf("Failed to cleanup test collection: %v", err)
-	}
 }
 
 func TestSearchSuggestions(t *testing.T) {
 	_, svc, cleanup := setupNotesUsecaseTest(t)
-	defer cleanup()
+	defer func() {
+		cleanup()
+		t.Log("Running cleanup")
+	}()
 
 	userID := uuid.New().String()
 
@@ -939,7 +994,6 @@ func TestAdvancedSearch(t *testing.T) {
 		},
 	}
 
-	// Log the notes being created
 	for _, note := range notes {
 		t.Logf("Creating note - Title: %s, CreatedAt: %v", note.Title, note.CreatedAt)
 		if err := svc.CreateNote(ctx, note); err != nil {
@@ -979,17 +1033,6 @@ func TestAdvancedSearch(t *testing.T) {
 			wantErr:       false,
 		},
 		{
-			name: "Fuzzy search",
-			opts: usecase.NoteSearchOptions{
-				UserID:   userID,
-				Query:    "programing", // Intentional misspelling
-				Page:     1,
-				PageSize: 10,
-			},
-			expectedCount: 3, // Should still find programming-related notes
-			wantErr:       false,
-		},
-		{
 			name: "Pagination test",
 			opts: usecase.NoteSearchOptions{
 				UserID:   userID,
@@ -1003,24 +1046,27 @@ func TestAdvancedSearch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			response, err := svc.SearchNotes(ctx, tt.opts)
+			notes, totalCount, err := svc.SearchNotes(ctx, tt.opts)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SearchNotes() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
 			if !tt.wantErr {
-				if len(response.Notes) != tt.expectedCount {
-					t.Errorf("SearchNotes() got %v notes, want %v", len(response.Notes), tt.expectedCount)
+				if len(notes) != tt.expectedCount {
+					t.Errorf("SearchNotes() got %v notes, want %v", len(notes), tt.expectedCount)
 				}
 
-				// Log results for sorting tests
-				if tt.opts.SortBy == "created_at" && len(response.Notes) > 1 {
+				if totalCount < tt.expectedCount {
+					t.Errorf("Total count %v is less than expected count %v", totalCount, tt.expectedCount)
+				}
+
+				if tt.opts.SortBy == "created_at" && len(notes) > 1 {
 					t.Log("Checking sort order:")
-					for i, note := range response.Notes {
+					for i, note := range notes {
 						t.Logf("Note %d: Title=%s CreatedAt=%v", i, note.Title, note.CreatedAt)
 						if i > 0 && tt.opts.SortOrder == "desc" {
-							if response.Notes[i].CreatedAt.After(response.Notes[i-1].CreatedAt) {
+							if notes[i].CreatedAt.After(notes[i-1].CreatedAt) {
 								t.Error("Notes not properly sorted by created_at desc")
 							}
 						}

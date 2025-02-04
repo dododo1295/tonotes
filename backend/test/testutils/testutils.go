@@ -3,91 +3,163 @@ package testutils
 import (
 	"context"
 	"log"
+	"main/utils"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
-// SetupTestDB sets up a test database and returns a cleanup function
+// SetupTestEnvironment sets up the test environment variables
 func SetupTestEnvironment() {
-	// Load environment variables from .env file
-	if err := godotenv.Load("../.env"); err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
+	// Find and load the main .env file
+	rootDir := findProjectRoot()
+	if envPath := filepath.Join(rootDir, ".env"); rootDir != "" {
+		if err := godotenv.Load(envPath); err != nil {
+			log.Printf("Warning: Could not load .env file: %v", err)
+		} else {
+			log.Printf("Loaded .env file from: %s", envPath)
+		}
 	}
 
+	// Set test environment variables
+	os.Setenv("GO_ENV", "test")
+	os.Setenv("MONGO_USERNAME", "admin")
+	os.Setenv("MONGO_PASSWORD", "mongodblmpvBMCqJ3Ig2eX2oCTlNbf7TJ5533L80TvM8LC")
+
+	// JWT secret key
+	utils.JWTSecretKey = os.Getenv("JWT_SECRET_KEY")
+	if utils.JWTSecretKey == "" {
+		log.Fatal("JWT_SECRET_KEY environment variable not set")
+	}
+	// Construct MongoDB URI with credentials
 	mongoURI := os.Getenv("MONGO_URI")
-	// Set environment variables
-	envVars := map[string]string{
-		"GO_ENV":              "test",
-		"MONGO_URI":           mongoURI,
-		"MONGO_DB":            "tonotes_test",
-		"USERS_COLLECTION":    "users",
-		"NOTES_COLLECTION":    "notes",
-		"TODOS_COLLECTION":    "todos",
-		"JWT_SECRET_KEY":      "test_secret_key",
-		"SESSIONS_COLLECTION": "sessions",
+	if mongoURI == "" {
+		mongoURI = "mongodb://localhost:27017"
 	}
 
-	for key, value := range envVars {
-		os.Setenv(key, value)
-		log.Printf("Set environment variable: %s=%s", key, value)
+	// Replace template variables in URI
+	mongoURI = strings.Replace(mongoURI, "${MONGO_USERNAME}", os.Getenv("MONGO_USERNAME"), -1)
+	mongoURI = strings.Replace(mongoURI, "${MONGO_PASSWORD}", os.Getenv("MONGO_PASSWORD"), -1)
+
+	os.Setenv("TEST_MONGO_URI", mongoURI)
+	os.Setenv("MONGO_DB", "tonotes_test")
+	os.Setenv("MONGO_DB_TEST", "tonotes_test")
+
+	// Set connection pool settings
+	os.Setenv("MONGO_MAX_POOL_SIZE", "100")
+	os.Setenv("MONGO_MIN_POOL_SIZE", "10")
+	os.Setenv("MONGO_MAX_CONN_IDLE_TIME", "60")
+}
+
+func findProjectRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
 	}
 }
 
 // SetupTestDB sets up a test database and returns a cleanup function
 func SetupTestDB(t *testing.T) (*mongo.Client, func()) {
-	t.Log("Setting up test database")
-	if err := godotenv.Load("../.env"); err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
+	// Ensure test environment is set up
+	if os.Getenv("GO_ENV") != "test" {
+		SetupTestEnvironment()
 	}
-	mongoURI := os.Getenv("MONGO_URI")
 
-	client, err := mongo.Connect(context.Background(),
-		options.Client().ApplyURI(mongoURI))
+	// Get MongoDB URI and credentials
+	uri := os.Getenv("TEST_MONGO_URI")
+	if uri == "" {
+		t.Fatal("TEST_MONGO_URI environment variable not set")
+	}
+
+	// Configure MongoDB client options with connection pooling
+	opts := options.Client().
+		ApplyURI(uri).
+		SetMaxPoolSize(utils.GetEnvAsUint64("MONGO_MAX_POOL_SIZE", 100)).
+		SetMinPoolSize(utils.GetEnvAsUint64("MONGO_MIN_POOL_SIZE", 10)).
+		SetMaxConnIdleTime(time.Duration(utils.GetEnvAsInt("MONGO_MAX_CONN_IDLE_TIME", 60)) * time.Second)
+
+	// Add credentials if provided
+	if username := os.Getenv("MONGO_USERNAME"); username != "" {
+		opts.SetAuth(options.Credential{
+			Username: username,
+			Password: os.Getenv("MONGO_PASSWORD"),
+		})
+	}
+
+	// Connect to MongoDB with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client, err := mongo.Connect(ctx, opts)
 	if err != nil {
 		t.Fatalf("Failed to connect to MongoDB: %v", err)
 	}
 
-	// Ping the database
-	err = client.Ping(context.Background(), readpref.Primary())
-	if err != nil {
-		t.Fatalf("Failed to ping database: %v", err)
-	}
-	t.Log("Connected to test database")
-
-	// Create database
-	db := client.Database("tonotes_test")
-
-	// Create collections
-	collections := []string{"users", "sessions"}
-	for _, collName := range collections {
-		err := db.CreateCollection(context.Background(), collName)
-		if err != nil {
-			// Ignore NamespaceExists error
-			if !strings.Contains(err.Error(), "NamespaceExists") {
-				t.Logf("Warning creating collection %s: %v", collName, err)
-			}
-		}
-		t.Logf("Ensured collection exists: %s", collName)
+	// Verify connection
+	if err = client.Ping(ctx, nil); err != nil {
+		t.Fatalf("Failed to ping MongoDB: %v", err)
 	}
 
-	// Return cleanup function
+	// Setup cleanup function
 	cleanup := func() {
-		t.Log("Cleaning up test database")
-		for _, collName := range collections {
-			if err := db.Collection(collName).Drop(context.Background()); err != nil {
-				t.Logf("Warning: Failed to drop collection %s: %v", collName, err)
-			}
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		// Drop test database
+		if err := client.Database(os.Getenv("MONGO_DB_TEST")).Drop(ctx); err != nil {
+			t.Logf("Warning: Failed to drop test database: %v", err)
 		}
-		if err := client.Disconnect(context.Background()); err != nil {
+
+		// Disconnect client
+		if err := client.Disconnect(ctx); err != nil {
 			t.Logf("Warning: Failed to disconnect: %v", err)
 		}
 	}
 
 	return client, cleanup
+}
+
+// Helper function for tests to verify environment
+func VerifyTestEnvironment(t *testing.T) {
+	requiredVars := []string{
+		"MONGO_USERNAME",
+		"MONGO_PASSWORD",
+		"MONGO_URI",
+		"MONGO_DB",
+		"MONGO_DB_TEST",
+		"TEST_MONGO_URI",
+	}
+
+	t.Log("Verifying test environment configuration:")
+	for _, v := range requiredVars {
+		value := os.Getenv(v)
+		if value == "" {
+			t.Errorf("Required environment variable %s is missing", v)
+		} else {
+			t.Logf("%s is set", v)
+		}
+	}
+
+	// Verify we're using test database
+	if os.Getenv("MONGO_DB") != os.Getenv("MONGO_DB_TEST") {
+		t.Error("Test environment is not using test database")
+	}
 }

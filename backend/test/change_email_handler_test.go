@@ -9,6 +9,7 @@ import (
 	"main/model"
 	"main/repository"
 	"main/services"
+	"main/test/testutils"
 	"main/utils"
 	"net/http"
 	"net/http/httptest"
@@ -18,8 +19,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func init() {
@@ -28,16 +27,15 @@ func init() {
 	os.Setenv("JWT_SECRET_KEY", "test_secret_key")
 	os.Setenv("JWT_EXPIRATION_TIME", "3600")
 	os.Setenv("REFRESH_TOKEN_EXPIRATION_TIME", "604800")
-	os.Setenv("MONGO_DB", "tonotes_test")
+	os.Setenv("MONGO_DB_TEST", "tonotes_test")
 	os.Setenv("USERS_COLLECTION", "users")
 }
 
 func TestChangeEmailHandler(t *testing.T) {
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://localhost:27017"))
-	if err != nil {
-		t.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-	defer client.Disconnect(context.Background())
+	// Setup test environment
+	testutils.SetupTestEnvironment()
+	client, cleanup := testutils.SetupTestDB(t)
+	defer cleanup()
 
 	utils.MongoClient = client
 
@@ -69,7 +67,7 @@ func TestChangeEmailHandler(t *testing.T) {
 					Username:        "testuser",
 					Password:        "password",
 					CreatedAt:       time.Now(),
-					LastEmailChange: time.Now().Add(-15 * 24 * time.Hour), // 15 days ago
+					LastEmailChange: time.Now().Add(-15 * 24 * time.Hour),
 				}
 				_, err := userRepo.AddUser(context.Background(), user)
 				if err != nil {
@@ -221,16 +219,25 @@ func TestChangeEmailHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Clear users collection
-			if err := client.Database("tonotes_test").Collection("users").Drop(context.Background()); err != nil {
-				t.Fatalf("Failed to clear users collection: %v", err)
+			// Clear users collection before each test
+			db := client.Database(os.Getenv("MONGO_DB"))
+			if err := db.Collection("users").Drop(context.Background()); err != nil {
+				t.Logf("Warning: Failed to drop users collection: %v", err)
 			}
 
+			// Initialize repository
 			userRepo := repository.GetUserRepo(utils.MongoClient)
+
+			// Setup test data and get userID
 			userID := tt.setupTestData(t, userRepo)
 
+			// Create request body
+			jsonBody, err := json.Marshal(tt.requestBody)
+			if err != nil {
+				t.Fatalf("Failed to marshal request body: %v", err)
+			}
+
 			// Create request
-			jsonBody, _ := json.Marshal(tt.requestBody)
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest("POST", "/change-email", bytes.NewBuffer(jsonBody))
 			req.Header.Set("Content-Type", "application/json")
@@ -240,15 +247,23 @@ func TestChangeEmailHandler(t *testing.T) {
 				req.Header.Set("Authorization", "Bearer "+token)
 			}
 
-			// Set up context
+			// Set up router
 			router := gin.New()
 			router.POST("/change-email", func(c *gin.Context) {
 				c.Set("user_id", userID)
 				handler.ChangeEmailHandler(c)
 			})
 
-			// Serve request
+			// Log test information
+			t.Logf("Test: %s", tt.name)
+			t.Logf("Request Body: %s", jsonBody)
+
+			// Execute request
 			router.ServeHTTP(w, req)
+
+			// Log response
+			t.Logf("Response Status: %d", w.Code)
+			t.Logf("Response Body: %s", w.Body.String())
 
 			// Check status code
 			if w.Code != tt.expectedCode {
@@ -257,6 +272,24 @@ func TestChangeEmailHandler(t *testing.T) {
 
 			// Run custom response checks
 			tt.checkResponse(t, w)
+
+			// Verify database state if needed
+			if w.Code == http.StatusOK {
+				updatedUser, err := userRepo.FindUser(userID)
+				if err != nil {
+					t.Fatalf("Failed to fetch updated user: %v", err)
+				}
+
+				expectedEmail := tt.requestBody["new_email"].(string)
+				if updatedUser.Email != expectedEmail {
+					t.Errorf("Expected user email to be %q, got %q", expectedEmail, updatedUser.Email)
+				}
+
+				// Verify LastEmailChange was updated
+				if time.Since(updatedUser.LastEmailChange) > time.Second {
+					t.Error("LastEmailChange was not updated properly")
+				}
+			}
 		})
 	}
 }

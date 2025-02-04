@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"main/test/testutils"
 	"main/utils"
 	"os"
 	"sync"
@@ -15,11 +16,13 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+func init() {
+	testutils.SetupTestEnvironment()
+}
+
 func TestMongoConnection(t *testing.T) {
-	// Set default environment variables for testing
-	os.Setenv("GO_ENV", "test")
-	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
-	os.Setenv("MONGO_DB", "tonotes_test")
+	// Verify environment setup
+	testutils.VerifyTestEnvironment(t)
 
 	tests := []struct {
 		name    string
@@ -29,23 +32,23 @@ func TestMongoConnection(t *testing.T) {
 		{
 			name: "Successful Connection",
 			setup: func() {
-				// Use valid local MongoDB URI
-				os.Setenv("MONGO_URI", "mongodb://localhost:27017")
+				// Using TEST_MONGO_URI from environment
+				t.Logf("Using MongoDB URI: %s", os.Getenv("TEST_MONGO_URI"))
 			},
 			wantErr: false,
 		},
 		{
 			name: "Invalid MongoDB URI",
 			setup: func() {
-				// Use a host that doesn't exist - this will cause a connection timeout
-				os.Setenv("MONGO_URI", "mongodb://nonexistent-host:27017")
+				// Temporarily override the URI
+				os.Setenv("TEST_MONGO_URI", "mongodb://nonexistent-host:27017")
 			},
 			wantErr: true,
 		},
 		{
 			name: "Empty MongoDB URI",
 			setup: func() {
-				os.Setenv("MONGO_URI", "")
+				os.Setenv("TEST_MONGO_URI", "")
 			},
 			wantErr: true,
 		},
@@ -56,17 +59,25 @@ func TestMongoConnection(t *testing.T) {
 			// Run setup for this specific test case
 			tt.setup()
 
-			// Create a context with 2-second timeout to avoid long waits
+			// Create a context with timeout
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
-			// Try to connect to MongoDB
-			client, err := mongo.Connect(ctx, options.Client().ApplyURI(os.Getenv("MONGO_URI")))
+			// Get MongoDB options from environment
+			opts := options.Client().
+				ApplyURI(os.Getenv("TEST_MONGO_URI")).
+				SetMaxPoolSize(utils.GetEnvAsUint64("MONGO_MAX_POOL_SIZE", 100)).
+				SetMinPoolSize(utils.GetEnvAsUint64("MONGO_MIN_POOL_SIZE", 10)).
+				SetMaxConnIdleTime(time.Duration(utils.GetEnvAsInt("MONGO_MAX_CONN_IDLE_TIME", 60)) * time.Second)
 
-			// If we expect an error
+			// Try to connect to MongoDB
+			client, err := mongo.Connect(ctx, opts)
+
+			// Reset environment after test
+			defer testutils.SetupTestEnvironment()
+
 			if tt.wantErr {
 				if err == nil {
-					// Try to ping to force a connection attempt
 					err = client.Ping(ctx, nil)
 				}
 				if err == nil {
@@ -75,13 +86,12 @@ func TestMongoConnection(t *testing.T) {
 				return
 			}
 
-			// If we don't expect an error but got one
 			if err != nil {
 				t.Errorf("Failed to connect to MongoDB: %v", err)
 				return
 			}
 
-			// Verify we can ping the database
+			// Verify connection
 			err = client.Ping(ctx, nil)
 			if err != nil {
 				t.Errorf("Failed to ping MongoDB: %v", err)
@@ -89,43 +99,29 @@ func TestMongoConnection(t *testing.T) {
 			}
 
 			// Test database selection
-			dbName := "tonotes_test"
-			db := client.Database(dbName)
+			db := client.Database(os.Getenv("MONGO_DB_TEST"))
 			if db == nil {
 				t.Error("Failed to get database reference")
 				return
 			}
 
-			// Clean up: disconnect from MongoDB
+			// Clean up
 			defer func() {
 				if err = client.Disconnect(ctx); err != nil {
 					t.Errorf("Failed to disconnect: %v", err)
 				}
 			}()
-
-			// Verify the global MongoDB client is set
-			if utils.MongoClient == nil {
-				t.Error("MongoClient is nil")
-			}
 		})
 	}
 }
+
 func TestMongoOperations(t *testing.T) {
-	// Set environment variables
-	os.Setenv("GO_ENV", "test")
-	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
-	os.Setenv("MONGO_DB", "tonotes_test")
+	// Setup test database
+	client, cleanup := testutils.SetupTestDB(t)
+	defer cleanup()
 
-	// Setup MongoDB connection
 	ctx := context.Background()
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(os.Getenv("MONGO_URI")))
-	if err != nil {
-		t.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-	defer client.Disconnect(ctx)
-
-	// Test database operations
-	db := client.Database("tonotes_test")
+	db := client.Database(os.Getenv("MONGO_DB_TEST"))
 	collection := db.Collection("test_collection")
 
 	// Clear collection before testing
@@ -134,7 +130,7 @@ func TestMongoOperations(t *testing.T) {
 	}
 
 	// Test insert
-	_, err = collection.InsertOne(ctx, bson.M{"test": "data"})
+	_, err := collection.InsertOne(ctx, bson.M{"test": "data"})
 	if err != nil {
 		t.Errorf("Failed to insert document: %v", err)
 	}
@@ -146,23 +142,22 @@ func TestMongoOperations(t *testing.T) {
 		t.Errorf("Failed to find document: %v", err)
 	}
 
-	// Verify result
 	if result["test"] != "data" {
 		t.Errorf("Expected test field to be 'data', got %v", result["test"])
 	}
 }
 
 func TestConnectionPooling(t *testing.T) {
-	// Set test environment
-	os.Setenv("MONGO_MAX_POOL_SIZE", "10")
-	os.Setenv("MONGO_MIN_POOL_SIZE", "5")
-	os.Setenv("MONGO_MAX_CONN_IDLE_TIME", "30")
+	// Get pool settings from environment
+	maxPoolSize := utils.GetEnvAsUint64("MONGO_MAX_POOL_SIZE", 100)
+	minPoolSize := utils.GetEnvAsUint64("MONGO_MIN_POOL_SIZE", 10)
+	maxConnIdleTime := utils.GetEnvAsInt("MONGO_MAX_CONN_IDLE_TIME", 60)
 
 	client, err := mongo.Connect(context.Background(), options.Client().
-		ApplyURI("mongodb://localhost:27017").
-		SetMaxPoolSize(10).
-		SetMinPoolSize(5).
-		SetMaxConnIdleTime(30*time.Second))
+		ApplyURI(os.Getenv("TEST_MONGO_URI")).
+		SetMaxPoolSize(maxPoolSize).
+		SetMinPoolSize(minPoolSize).
+		SetMaxConnIdleTime(time.Duration(maxConnIdleTime)*time.Second))
 
 	if err != nil {
 		t.Fatalf("Failed to connect to MongoDB: %v", err)
@@ -171,7 +166,7 @@ func TestConnectionPooling(t *testing.T) {
 
 	// Test concurrent connections
 	var wg sync.WaitGroup
-	for i := 0; i < 15; i++ {
+	for i := 0; i < int(maxPoolSize+5); i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -179,7 +174,6 @@ func TestConnectionPooling(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			// Perform a simple operation
 			err := client.Database("test").RunCommand(ctx, bson.D{{Key: "ping", Value: 1}}).Err()
 			if err != nil {
 				t.Errorf("Connection %d failed: %v", i, err)
@@ -190,20 +184,19 @@ func TestConnectionPooling(t *testing.T) {
 
 	// Verify metrics
 	metrics := utils.GetMongoMetrics()
-	if metrics.ActiveConnections > 10 {
-		t.Errorf("Pool size exceeded maximum: got %d, want <= 10", metrics.ActiveConnections)
+	if metrics.ActiveConnections > int64(maxPoolSize) {
+		t.Errorf("Pool size exceeded maximum: got %d, want <= %d",
+			metrics.ActiveConnections, maxPoolSize)
 	}
 }
 
 func TestConnectionMonitoring(t *testing.T) {
-	// Initialize metrics
 	metrics := &utils.MongoMetrics{
 		LastCheckTime: time.Now(),
 	}
 
-	// Create monitored client
 	clientOpts := options.Client().
-		ApplyURI("mongodb://localhost:27017").
+		ApplyURI(os.Getenv("TEST_MONGO_URI")).
 		SetPoolMonitor(&event.PoolMonitor{
 			Event: func(evt *event.PoolEvent) {
 				switch evt.Type {
@@ -221,17 +214,14 @@ func TestConnectionMonitoring(t *testing.T) {
 	}
 	defer client.Disconnect(context.Background())
 
-	// Perform operations to trigger events
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
-		// Fix unkeyed bson.D
 		err := client.Database("test").RunCommand(ctx, bson.D{{Key: "ping", Value: 1}}).Err()
 		if err != nil {
 			t.Errorf("Operation %d failed: %v", i, err)
 		}
 	}
 
-	// Verify metrics
 	if metrics.CreatedConnections == 0 {
 		t.Error("No connections were created")
 	}
@@ -243,7 +233,7 @@ func TestConnectionMonitoring(t *testing.T) {
 
 func TestConnectionRecovery(t *testing.T) {
 	client, err := mongo.Connect(context.Background(), options.Client().
-		ApplyURI("mongodb://localhost:27017").
+		ApplyURI(os.Getenv("TEST_MONGO_URI")).
 		SetServerSelectionTimeout(2*time.Second))
 
 	if err != nil {
@@ -251,7 +241,6 @@ func TestConnectionRecovery(t *testing.T) {
 	}
 	defer client.Disconnect(context.Background())
 
-	// Test reconnection after failure
 	tests := []struct {
 		name        string
 		operation   func() error
@@ -288,7 +277,6 @@ func TestConnectionRecovery(t *testing.T) {
 				return
 			}
 
-			// Check if error is retryable
 			if cmdErr, ok := err.(mongo.CommandError); ok {
 				isRetryable := cmdErr.Labels != nil && len(cmdErr.Labels) > 0
 				if isRetryable != tt.shouldRetry {

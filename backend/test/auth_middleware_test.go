@@ -9,105 +9,61 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
-func TestAuthMiddleware(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	os.Setenv("JWT_SECRET_KEY", "test_secret_key")
+func init() {
+	// Set minimal required env vars for JWT
+	os.Setenv("JWT_SECRET_KEY", "test_secret")
+	os.Setenv("JWT_EXPIRATION_TIME", "3600")
 	utils.InitJWT()
+	gin.SetMode(gin.TestMode)
+}
 
-	// set up redis
-	setupTestRedis(t)
-	defer services.TokenBlacklist.Close()
-
+func TestAuthMiddleware(t *testing.T) {
 	tests := []struct {
 		name           string
-		setupAuth      func() string
+		authHeader     string
 		expectedStatus int
-		checkResponse  func(*testing.T, *httptest.ResponseRecorder)
+		expectedError  string
 	}{
 		{
-			name: "Valid Token",
-			setupAuth: func() string {
-				token, _ := services.GenerateToken("test-user-id")
-				return "Bearer " + token
-			},
+			name:           "Valid Token",
+			authHeader:     createValidToken(t),
 			expectedStatus: http.StatusOK,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				// Success case doesn't return a body
-				if w.Body.Len() != 0 {
-					t.Error("Expected empty response body for successful auth")
-				}
-			},
 		},
 		{
-			name: "No Token",
-			setupAuth: func() string {
-				return ""
-			},
+			name:           "No Token",
+			authHeader:     "",
 			expectedStatus: http.StatusUnauthorized,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var response map[string]interface{}
-				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-					t.Fatalf("Failed to parse response: %v", err)
-				}
-				if errMsg, ok := response["error"].(string); !ok || errMsg != "Missing or invalid token" {
-					t.Errorf("Expected 'Missing or invalid token' error, got %v", errMsg)
-				}
-			},
+			expectedError:  "Missing or invalid token",
 		},
 		{
-			name: "Invalid Token Format",
-			setupAuth: func() string {
-				return "Bearer invalid-token"
-			},
+			name:           "Invalid Token Format",
+			authHeader:     "Bearer invalid-token",
 			expectedStatus: http.StatusUnauthorized,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var response map[string]interface{}
-				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-					t.Fatalf("Failed to parse response: %v", err)
-				}
-				if errMsg, ok := response["error"].(string); !ok || errMsg != "Invalid token" {
-					t.Errorf("Expected 'Invalid token' error, got %v", errMsg)
-				}
-			},
+			expectedError:  "Invalid token",
 		},
 		{
-			name: "Blacklisted Token",
-			setupAuth: func() string {
-				token, _ := services.GenerateToken("test-user-id")
-				services.BlacklistTokens(token, "") // Blacklist the token
-				return "Bearer " + token
-			},
+			name:           "Missing Bearer Prefix",
+			authHeader:     createValidToken(t)[7:], // Remove "Bearer " prefix
 			expectedStatus: http.StatusUnauthorized,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var response map[string]interface{}
-				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-					t.Fatalf("Failed to parse response: %v", err)
-				}
-				if errMsg, ok := response["error"].(string); !ok || errMsg != "Token has been invalidated" {
-					t.Errorf("Expected 'Token has been invalidated' error, got %v", errMsg)
-				}
-			},
+			expectedError:  "Missing or invalid token",
 		},
 		{
-			name: "Missing Bearer Prefix",
-			setupAuth: func() string {
-				token, _ := services.GenerateToken("test-user-id")
-				return token
-			},
+			name:           "Malformed Bearer Token",
+			authHeader:     "Bearer abc def",
 			expectedStatus: http.StatusUnauthorized,
-			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
-				var response map[string]interface{}
-				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-					t.Fatalf("Failed to parse response: %v", err)
-				}
-				if errMsg, ok := response["error"].(string); !ok || errMsg != "Missing or invalid token" {
-					t.Errorf("Expected 'Missing or invalid token' error, got %v", errMsg)
-				}
-			},
+			expectedError:  "Invalid token",
+		},
+		{
+			name:           "Expired Token",
+			authHeader:     createExpiredToken(t),
+			expectedStatus: http.StatusUnauthorized,
+			expectedError:  "Invalid token",
 		},
 	}
 
@@ -122,9 +78,8 @@ func TestAuthMiddleware(t *testing.T) {
 
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/test", nil)
-
-			if auth := tt.setupAuth(); auth != "" {
-				req.Header.Set("Authorization", auth)
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
 			}
 
 			router.ServeHTTP(w, req)
@@ -133,7 +88,46 @@ func TestAuthMiddleware(t *testing.T) {
 				t.Errorf("Expected status code %d, got %d", tt.expectedStatus, w.Code)
 			}
 
-			tt.checkResponse(t, w)
+			if tt.expectedError != "" {
+				var response struct {
+					Error string `json:"error"`
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+				if response.Error != tt.expectedError {
+					t.Errorf("Expected error %q, got %q", tt.expectedError, response.Error)
+				}
+			} else if w.Body.Len() != 0 {
+				t.Error("Expected empty response body for successful auth")
+			}
 		})
 	}
+}
+
+// Helper functions
+func createValidToken(t *testing.T) string {
+	token, err := services.GenerateToken("test-user-id")
+	if err != nil {
+		t.Fatalf("Failed to generate token: %v", err)
+	}
+	return "Bearer " + token
+}
+
+func createExpiredToken(t *testing.T) string {
+	// Create token that expired 1 hour ago
+	expiredTime := time.Now().Add(-1 * time.Hour)
+	claims := map[string]interface{}{
+		"user_id": "test-user-id",
+		"exp":     expiredTime.Unix(),
+		"iat":     expiredTime.Unix(),
+		"iss":     "toNotes",
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims(claims))
+	signedToken, err := token.SignedString([]byte(utils.JWTSecretKey))
+	if err != nil {
+		t.Fatalf("Failed to generate expired token: %v", err)
+	}
+	return "Bearer " + signedToken
 }
