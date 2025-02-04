@@ -8,7 +8,6 @@ import (
 	"main/utils"
 	"os"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -22,6 +21,18 @@ type NotesRepo struct {
 	MongoCollection *mongo.Collection
 }
 
+type SearchOptions struct {
+	UserID      string
+	Query       string
+	Tags        []string
+	MatchAll    bool
+	Page        int
+	PageSize    int
+	SortBy      string
+	SortOrder   string
+	SearchScore bool
+}
+
 func GetNotesRepo(client *mongo.Client) *NotesRepo {
 	dbName := os.Getenv("MONGO_DB")
 	collectionName := os.Getenv("NOTES_COLLECTION")
@@ -32,114 +43,6 @@ func GetNotesRepo(client *mongo.Client) *NotesRepo {
 	return &NotesRepo{
 		MongoCollection: client.Database(dbName).Collection(collectionName),
 	}
-}
-
-type NotesSearchOptions struct {
-	UserID      string
-	Query       string   // For text search
-	Tags        []string // For tag search
-	MatchAll    bool     // For tag matching strategy (AND/OR)
-	SearchScore bool     // Whether to include text search score
-	SortBy      string   // Add this field
-	SortOrder   string   // Add this field
-}
-
-func (r *NotesRepo) FindNotes(opts NotesSearchOptions) ([]*model.Notes, error) {
-	timer := utils.TrackDBOperation("find", "notes")
-	defer timer.ObserveDuration()
-
-	filter := bson.M{
-		"user_id":     opts.UserID,
-		"is_archived": false,
-	}
-
-	if opts.Query != "" {
-		if !strings.Contains(opts.Query, " ") {
-			filter["$text"] = bson.M{"$search": opts.Query}
-		} else {
-			searchTerms := strings.Fields(opts.Query)
-			andConditions := make([]bson.M, 0)
-			for _, term := range searchTerms {
-				andConditions = append(andConditions, bson.M{
-					"$or": []bson.M{
-						{"title": bson.M{"$regex": term, "$options": "i"}},
-						{"content": bson.M{"$regex": term, "$options": "i"}},
-						{"tags": bson.M{"$regex": term, "$options": "i"}},
-					},
-				})
-			}
-			if len(andConditions) > 0 {
-				filter["$and"] = andConditions
-			}
-		}
-	}
-
-	if len(opts.Tags) > 0 {
-		if opts.MatchAll {
-			filter["tags"] = bson.M{"$all": opts.Tags}
-		} else {
-			filter["tags"] = bson.M{"$in": opts.Tags}
-		}
-	}
-
-	findOptions := options.Find()
-
-	if opts.SearchScore && opts.Query != "" && !strings.Contains(opts.Query, " ") {
-		findOptions.SetProjection(bson.M{
-			"score": bson.M{"$meta": "textScore"},
-		})
-		findOptions.SetSort(bson.D{
-			{Key: "score", Value: bson.M{"$meta": "textScore"}},
-			{Key: "created_at", Value: -1},
-		})
-	} else {
-		sortOrder := -1
-		if opts.SortOrder == "asc" {
-			sortOrder = 1
-		}
-
-		sortField := "created_at"
-		if opts.SortBy != "" {
-			sortField = opts.SortBy
-		}
-
-		findOptions.SetSort(bson.D{{Key: sortField, Value: sortOrder}})
-	}
-
-	cursor, err := r.MongoCollection.Find(context.Background(), filter, findOptions)
-	if err != nil {
-		utils.TrackError("database", "note_search_failed")
-		return nil, err
-	}
-	defer cursor.Close(context.Background())
-
-	var notes []*model.Notes
-	if err = cursor.All(context.Background(), &notes); err != nil {
-		utils.TrackError("database", "note_decode_failed")
-		return nil, err
-	}
-
-	if opts.Query != "" && strings.Contains(opts.Query, " ") {
-		sort.SliceStable(notes, func(i, j int) bool {
-			if opts.SearchScore {
-				matchesI := countMatches(notes[i], opts.Query)
-				matchesJ := countMatches(notes[j], opts.Query)
-				if matchesI != matchesJ {
-					return matchesI > matchesJ
-				}
-			}
-			return notes[i].CreatedAt.After(notes[j].CreatedAt)
-		})
-	} else if opts.SortBy == "created_at" || opts.Query == "" {
-		sort.SliceStable(notes, func(i, j int) bool {
-			if opts.SortOrder == "asc" {
-				return notes[i].CreatedAt.Before(notes[j].CreatedAt)
-			}
-			return notes[i].CreatedAt.After(notes[j].CreatedAt)
-		})
-	}
-
-	return notes, nil
 }
 
 // CountUserNotes counts the number of notes for a user
@@ -655,6 +558,66 @@ func (r *NotesRepo) GetSearchSuggestions(userID, prefix string) ([]string, error
 	}
 
 	return suggestions, nil
+}
+
+func (r *NotesRepo) FindNotes(ctx context.Context, opts SearchOptions) ([]*model.Notes, error) {
+	filter := bson.M{"user_id": opts.UserID}
+
+	// Add text search if query provided
+	if opts.Query != "" {
+		if strings.Contains(opts.Query, " ") {
+			// For multi-word queries, use $or with $regex
+			words := strings.Fields(opts.Query)
+			regexQueries := make([]bson.M, 0)
+			for _, word := range words {
+				regex := primitive.Regex{Pattern: word, Options: "i"}
+				regexQueries = append(regexQueries,
+					bson.M{"title": bson.M{"$regex": regex}},
+					bson.M{"content": bson.M{"$regex": regex}},
+				)
+			}
+			filter["$or"] = regexQueries
+		} else {
+			// For single-word queries, use text search
+			filter["$text"] = bson.M{"$search": opts.Query}
+		}
+	}
+
+	// Add tags filter if provided
+	if len(opts.Tags) > 0 {
+		if opts.MatchAll {
+			filter["tags"] = bson.M{"$all": opts.Tags}
+		} else {
+			filter["tags"] = bson.M{"$in": opts.Tags}
+		}
+	}
+
+	findOptions := options.Find()
+
+	// Configure sorting
+	if opts.SortBy != "" {
+		sortOrder := -1
+		if opts.SortOrder == "asc" {
+			sortOrder = 1
+		}
+		findOptions.SetSort(bson.M{opts.SortBy: sortOrder})
+	} else {
+		findOptions.SetSort(bson.M{"created_at": -1})
+	}
+
+	// Execute query
+	cursor, err := r.MongoCollection.Find(ctx, filter, findOptions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute find query: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var notes []*model.Notes
+	if err := cursor.All(ctx, &notes); err != nil {
+		return nil, fmt.Errorf("failed to decode notes: %w", err)
+	}
+
+	return notes, nil
 }
 
 // helper functions
