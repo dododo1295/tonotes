@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"main/dto"
 	"main/model"
 	"main/usecase"
 	"main/utils"
@@ -9,17 +10,24 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func SearchNotesHandler(c *gin.Context, notesService *usecase.NotesService) {
-	userID := c.GetString("userID") // Assuming middleware sets this
+type NotesHandler struct {
+	service *usecase.NotesService
+}
 
-	// Parse query parameters
+func NewNotesHandler(service *usecase.NotesService) *NotesHandler {
+	return &NotesHandler{
+		service: service,
+	}
+}
+func (h *NotesHandler) SearchNotes(c *gin.Context) {
+	userID := c.GetString("userID")
+
 	query := c.Query("q")
 	tags := c.QueryArray("tags")
 	sortBy := c.Query("sort_by")
 	sortOrder := c.Query("sort_order")
 	matchAll := c.Query("match_all") == "true"
 
-	// Parse pagination with defaults
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 
@@ -34,16 +42,22 @@ func SearchNotesHandler(c *gin.Context, notesService *usecase.NotesService) {
 		PageSize:  pageSize,
 	}
 
-	results, err := notesService.SearchNotes(c, searchOpts)
+	notes, totalCount, err := h.service.SearchNotes(c, searchOpts)
 	if err != nil {
 		utils.BadRequest(c, err.Error())
 		return
 	}
 
-	utils.Success(c, results)
+	response := dto.NewNotesPageResponse(
+		notes,
+		totalCount,
+		(totalCount+pageSize-1)/pageSize,
+		page,
+	)
+	utils.Success(c, response)
 }
 
-func CreateNoteHandler(c *gin.Context, notesService *usecase.NotesService) {
+func (h *NotesHandler) CreateNote(c *gin.Context) {
 	var note model.Notes
 	if err := c.ShouldBindJSON(&note); err != nil {
 		utils.BadRequest(c, "Invalid request body")
@@ -51,18 +65,16 @@ func CreateNoteHandler(c *gin.Context, notesService *usecase.NotesService) {
 	}
 
 	note.UserID = c.GetString("userID")
-	if err := notesService.CreateNote(c, &note); err != nil {
+	if err := h.service.CreateNote(c, &note); err != nil {
 		utils.BadRequest(c, err.Error())
 		return
 	}
 
-	utils.Success(c, gin.H{
-		"message": "Note created successfully",
-		"noteID":  note.ID,
-	})
+	response := dto.ToNoteResponse(&note)
+	utils.Success(c, response)
 }
 
-func UpdateNoteHandler(c *gin.Context, notesService *usecase.NotesService) {
+func (h *NotesHandler) UpdateNote(c *gin.Context) {
 	noteID := c.Param("id")
 	userID := c.GetString("userID")
 
@@ -72,7 +84,7 @@ func UpdateNoteHandler(c *gin.Context, notesService *usecase.NotesService) {
 		return
 	}
 
-	if err := notesService.UpdateNote(c, noteID, userID, &updates); err != nil {
+	if err := h.service.UpdateNote(c, noteID, userID, &updates); err != nil {
 		utils.BadRequest(c, err.Error())
 		return
 	}
@@ -80,11 +92,11 @@ func UpdateNoteHandler(c *gin.Context, notesService *usecase.NotesService) {
 	utils.Success(c, gin.H{"message": "Note updated successfully"})
 }
 
-func DeleteNoteHandler(c *gin.Context, notesService *usecase.NotesService) {
+func (h *NotesHandler) DeleteNote(c *gin.Context) {
 	noteID := c.Param("id")
 	userID := c.GetString("userID")
 
-	if err := notesService.DeleteNote(c, noteID, userID); err != nil {
+	if err := h.service.DeleteNote(c, noteID, userID); err != nil {
 		utils.BadRequest(c, err.Error())
 		return
 	}
@@ -92,11 +104,11 @@ func DeleteNoteHandler(c *gin.Context, notesService *usecase.NotesService) {
 	utils.Success(c, gin.H{"message": "Note deleted successfully"})
 }
 
-func ToggleFavoriteHandler(c *gin.Context, notesService *usecase.NotesService) {
+func (h *NotesHandler) ToggleFavorite(c *gin.Context) {
 	noteID := c.Param("id")
 	userID := c.GetString("userID")
 
-	if err := notesService.ToggleFavorite(c, noteID, userID); err != nil {
+	if err := h.service.ToggleFavorite(c, noteID, userID); err != nil {
 		utils.BadRequest(c, err.Error())
 		return
 	}
@@ -104,11 +116,11 @@ func ToggleFavoriteHandler(c *gin.Context, notesService *usecase.NotesService) {
 	utils.Success(c, gin.H{"message": "Note favorite status toggled successfully"})
 }
 
-func TogglePinHandler(c *gin.Context, notesService *usecase.NotesService) {
+func (h *NotesHandler) TogglePin(c *gin.Context) {
 	noteID := c.Param("id")
 	userID := c.GetString("userID")
 
-	if err := notesService.ToggleNotePin(c, noteID, userID); err != nil {
+	if err := h.service.ToggleNotePin(c, noteID, userID); err != nil {
 		utils.BadRequest(c, err.Error())
 		return
 	}
@@ -116,11 +128,11 @@ func TogglePinHandler(c *gin.Context, notesService *usecase.NotesService) {
 	utils.Success(c, gin.H{"message": "Note pin status toggled successfully"})
 }
 
-func ArchiveNoteHandler(c *gin.Context, notesService *usecase.NotesService) {
+func (h *NotesHandler) ArchiveNote(c *gin.Context) {
 	noteID := c.Param("id")
 	userID := c.GetString("userID")
 
-	if err := notesService.ArchiveNote(c, noteID, userID); err != nil {
+	if err := h.service.ArchiveNote(c, noteID, userID); err != nil {
 		utils.BadRequest(c, err.Error())
 		return
 	}
@@ -128,10 +140,10 @@ func ArchiveNoteHandler(c *gin.Context, notesService *usecase.NotesService) {
 	utils.Success(c, gin.H{"message": "Note archived successfully"})
 }
 
-func GetUserTagsHandler(c *gin.Context, notesService *usecase.NotesService) {
+func (h *NotesHandler) GetUserTags(c *gin.Context) {
 	userID := c.GetString("userID")
 
-	tags, err := notesService.GetUserTags(c, userID)
+	tags, err := h.service.GetUserTags(c, userID)
 	if err != nil {
 		utils.BadRequest(c, err.Error())
 		return
@@ -140,11 +152,11 @@ func GetUserTagsHandler(c *gin.Context, notesService *usecase.NotesService) {
 	utils.Success(c, tags)
 }
 
-func GetSearchSuggestionsHandler(c *gin.Context, notesService *usecase.NotesService) {
+func (h *NotesHandler) GetSearchSuggestions(c *gin.Context) {
 	userID := c.GetString("userID")
 	prefix := c.Query("prefix")
 
-	suggestions, err := notesService.GetSearchSuggestions(userID, prefix)
+	suggestions, err := h.service.GetSearchSuggestions(userID, prefix)
 	if err != nil {
 		utils.BadRequest(c, err.Error())
 		return
@@ -153,34 +165,51 @@ func GetSearchSuggestionsHandler(c *gin.Context, notesService *usecase.NotesServ
 	utils.Success(c, suggestions)
 }
 
-func GetUserNotesHandler(c *gin.Context, notesService *usecase.NotesService) {
+func (h *NotesHandler) GetUserNotes(c *gin.Context) {
 	userID := c.GetString("userID")
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "0"))
 
-	notes, err := notesService.GetUserNotes(c, userID, limit)
+	notes, totalCount, err := h.service.GetUserNotes(c, userID, limit)
 	if err != nil {
 		utils.BadRequest(c, err.Error())
 		return
 	}
 
-	utils.Success(c, notes)
+	pageSize := limit
+	if pageSize == 0 {
+		pageSize = len(notes)
+	}
+
+	response := dto.NewNotesPageResponse(
+		notes,
+		totalCount,
+		(totalCount+pageSize-1)/pageSize,
+		1,
+	)
+	utils.Success(c, response)
 }
 
-func GetArchivedNotesHandler(c *gin.Context, notesService *usecase.NotesService) {
+func (h *NotesHandler) GetArchivedNotes(c *gin.Context) {
 	userID := c.GetString("userID")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 
-	notes, err := notesService.GetArchivedNotes(c, userID, page, pageSize)
+	notes, totalCount, err := h.service.GetArchivedNotes(c, userID, page, pageSize)
 	if err != nil {
 		utils.BadRequest(c, err.Error())
 		return
 	}
 
-	utils.Success(c, notes)
+	response := dto.NewNotesPageResponse(
+		notes,
+		totalCount,
+		(totalCount+pageSize-1)/pageSize,
+		page,
+	)
+	utils.Success(c, response)
 }
 
-func UpdatePinPositionHandler(c *gin.Context, notesService *usecase.NotesService) {
+func (h *NotesHandler) UpdatePinPosition(c *gin.Context) {
 	noteID := c.Param("id")
 	userID := c.GetString("userID")
 
@@ -193,7 +222,7 @@ func UpdatePinPositionHandler(c *gin.Context, notesService *usecase.NotesService
 		return
 	}
 
-	if err := notesService.UpdatePinPosition(c, noteID, userID, req.Position); err != nil {
+	if err := h.service.UpdatePinPosition(c, noteID, userID, req.Position); err != nil {
 		utils.BadRequest(c, err.Error())
 		return
 	}
@@ -201,10 +230,10 @@ func UpdatePinPositionHandler(c *gin.Context, notesService *usecase.NotesService
 	utils.Success(c, gin.H{"message": "Pin position updated successfully"})
 }
 
-func GetAllUserTagsHandler(c *gin.Context, notesService *usecase.NotesService) {
+func (h *NotesHandler) GetAllUserTags(c *gin.Context) {
 	userID := c.GetString("userID")
 
-	tags, err := notesService.GetAllUserTags(c, userID)
+	tags, err := h.service.GetAllUserTags(c, userID)
 	if err != nil {
 		utils.BadRequest(c, err.Error())
 		return
@@ -213,14 +242,15 @@ func GetAllUserTagsHandler(c *gin.Context, notesService *usecase.NotesService) {
 	utils.Success(c, tags)
 }
 
-func GetPinnedNotesHandler(c *gin.Context, notesService *usecase.NotesService) {
+func (h *NotesHandler) GetPinnedNotes(c *gin.Context) {
 	userID := c.GetString("userID")
 
-	pinnedNotes, err := notesService.NotesRepo.GetPinnedNotes(userID)
+	notes, err := h.service.GetPinnedNotes(c.Request.Context(), userID)
 	if err != nil {
 		utils.BadRequest(c, err.Error())
 		return
 	}
 
-	utils.Success(c, pinnedNotes)
+	response := dto.ToNoteResponses(notes)
+	utils.Success(c, response)
 }
