@@ -13,7 +13,7 @@ type User struct {
 	IsActive           bool      `bson:"is_active" json:"is_active"`
 	TwoFactorSecret    string    `bson:"two_factor_secret,omitempty" json:"-"`
 	TwoFactorEnabled   bool      `bson:"two_factor_enabled" json:"two_factor_enabled"`
-	RecoveryCodes      []string  `bson:"recovery_codes,omitempty" json:"-"`
+	RecoveryCodes      []string  `bson:"recovery_codes" json:"-"`
 }
 
 type LoginRequest struct {
