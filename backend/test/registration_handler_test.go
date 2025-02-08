@@ -3,7 +3,6 @@ package test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +12,9 @@ import (
 	"unicode"
 
 	"main/handler"
+	"main/model"
+	"main/repository"
+	"main/test/testutils"
 	"main/utils"
 
 	"github.com/gin-gonic/gin"
@@ -20,88 +22,111 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func init() {
-	fmt.Println("Setting GO_ENV=test in init")
-	os.Setenv("GO_ENV", "test")
-	os.Setenv("JWT_SECRET_KEY", "test_secret_key")
-	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	testutils.SetupTestEnvironment()
 
 	// Register custom password validator
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
-		v.RegisterValidation("password", func(fl validator.FieldLevel) bool {
-			password := fl.Field().String()
-			// Password must:
-			// - Be at least 8 characters
-			// - Contain at least one uppercase letter
-			// - Contain at least one lowercase letter
-			// - Contain at least one number
-			// - Contain at least one special character
-			hasUpper := false
-			hasLower := false
-			hasNumber := false
-			hasSpecial := false
+		v.RegisterValidation("password", validatePassword)
+	}
+}
 
-			if len(password) < 6 {
-				return false
-			}
+func validatePassword(fl validator.FieldLevel) bool {
+	password := fl.Field().String()
+	hasUpper := false
+	hasLower := false
+	hasNumber := false
+	hasSpecial := false
 
-			for _, char := range password {
-				switch {
-				case unicode.IsUpper(char):
-					hasUpper = true
-				case unicode.IsLower(char):
-					hasLower = true
-				case unicode.IsNumber(char):
-					hasNumber = true
-				case unicode.IsPunct(char) || unicode.IsSymbol(char):
-					hasSpecial = true
-				}
-			}
+	if len(password) < 6 {
+		return false
+	}
 
-			return hasUpper && hasLower && hasNumber && hasSpecial
-		})
+	for _, char := range password {
+		switch {
+		case unicode.IsUpper(char):
+			hasUpper = true
+		case unicode.IsLower(char):
+			hasLower = true
+		case unicode.IsNumber(char):
+			hasNumber = true
+		case unicode.IsPunct(char) || unicode.IsSymbol(char):
+			hasSpecial = true
+		}
+	}
+
+	return hasUpper && hasLower && hasNumber && hasSpecial
+}
+
+func setupRegistrationTest(t *testing.T) (*repository.UserRepo, func()) {
+	// Verify environment setup
+	testutils.VerifyTestEnvironment(t)
+
+	// Setup test database
+	client, cleanup := testutils.SetupTestDB(t)
+
+	// Set MongoDB client
+	utils.MongoClient = client
+
+	// Get database reference
+	db := client.Database(os.Getenv("MONGO_DB_TEST"))
+
+	// Create users collection
+	err := db.CreateCollection(context.Background(), "users")
+	if err != nil && !strings.Contains(err.Error(), "NamespaceExists") {
+		t.Logf("Warning: Failed to create users collection: %v", err)
+	}
+
+	// Initialize repository
+	userRepo := repository.GetUserRepo(client)
+	userRepo.MongoCollection = db.Collection("users")
+
+	// Return cleanup function
+	return userRepo, func() {
+		t.Log("Running registration test cleanup")
+		if err := db.Collection("users").Drop(context.Background()); err != nil {
+			t.Logf("Warning: Failed to drop users collection: %v", err)
+		}
+		cleanup()
 	}
 }
 
 func TestRegistrationHandler(t *testing.T) {
-	os.Setenv("GO_ENV", "test")
-	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	// Setup
+	userRepo, cleanup := setupRegistrationTest(t)
+	defer cleanup()
 
-	testClient, err := mongo.Connect(context.Background(),
-		options.Client().ApplyURI(os.Getenv("MONGO_URI")))
-	if err != nil {
-		t.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-	defer testClient.Disconnect(context.Background())
-
-	utils.MongoClient = testClient
-
+	// Setup Gin
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(gin.Recovery())
+	router.Use(func(c *gin.Context) {
+		// Add logging middleware
+		t.Logf("Processing request: %s %s", c.Request.Method, c.Request.URL.Path)
+		c.Next()
+	})
 	router.POST("/register", handler.RegistrationHandler)
 
 	tests := []struct {
 		name          string
 		inputJSON     string
-		setupFunc     func() error
+		setupTestData func(*testing.T) error
 		expectedCode  int
 		checkResponse func(*testing.T, *httptest.ResponseRecorder)
+		checkDatabase func(*testing.T) error
 	}{
 		{
 			name:      "Successful Registration",
 			inputJSON: `{"username":"testuser1234","password":"Test12!!@@","email":"test@example.com"}`,
-			setupFunc: func() error {
-				return testClient.Database("tonotes_test").Collection("users").Drop(context.Background())
+			setupTestData: func(t *testing.T) error {
+				return userRepo.MongoCollection.Drop(context.Background())
 			},
 			expectedCode: http.StatusCreated,
 			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var response utils.Response
-				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
 					t.Fatalf("Failed to parse response: %v", err)
 				}
 
@@ -110,40 +135,52 @@ func TestRegistrationHandler(t *testing.T) {
 					t.Fatal("Response missing data object")
 				}
 
-				if _, hasToken := data["token"]; !hasToken {
-					t.Error("Response missing token")
+				// Check required fields
+				requiredFields := []string{"token", "refresh", "message"}
+				for _, field := range requiredFields {
+					if _, exists := data[field]; !exists {
+						t.Errorf("Response missing required field: %s", field)
+					}
 				}
-				if _, hasRefresh := data["refresh"]; !hasRefresh {
-					t.Error("Response missing refresh token")
-				}
+
 				if msg, ok := data["message"].(string); !ok || msg != "user registered successfully" {
-					t.Errorf("Expected message 'user registered successfully', got %q", msg)
+					t.Errorf("Expected message 'user registered successfully', got %v", msg)
 				}
+			},
+			checkDatabase: func(t *testing.T) error {
+				var user model.User
+				err := userRepo.MongoCollection.FindOne(context.Background(),
+					bson.M{"username": "testuser1234"}).Decode(&user)
+				if err != nil {
+					return err
+				}
+				if user.Email != "test@example.com" {
+					t.Errorf("Expected email test@example.com, got %s", user.Email)
+				}
+				return nil
 			},
 		},
 		{
 			name:      "Duplicate Username",
 			inputJSON: `{"username":"existinguser","password":"Test12!!@@","email":"another@example.com"}`,
-			setupFunc: func() error {
-				if err := testClient.Database("tonotes_test").Collection("users").Drop(context.Background()); err != nil {
+			setupTestData: func(t *testing.T) error {
+				if err := userRepo.MongoCollection.Drop(context.Background()); err != nil {
 					return err
 				}
-				_, err := testClient.Database("tonotes_test").Collection("users").InsertOne(
-					context.Background(),
-					bson.M{
-						"username":   "existinguser",
-						"password":   "$2a$10$XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-						"email":      "existing@test.com",
-						"created_at": time.Now(),
-						"user_id":    uuid.New().String(),
-					},
-				)
+				_, err := userRepo.MongoCollection.InsertOne(context.Background(), model.User{
+					UserID:    uuid.New().String(),
+					Username:  "existinguser",
+					Password:  "$2a$10$XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+					Email:     "existing@test.com",
+					CreatedAt: time.Now(),
+				})
 				return err
 			},
 			expectedCode: http.StatusConflict,
 			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var response utils.Response
-				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
 					t.Fatalf("Failed to parse response: %v", err)
 				}
 
@@ -158,7 +195,8 @@ func TestRegistrationHandler(t *testing.T) {
 			expectedCode: http.StatusBadRequest,
 			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var response utils.Response
-				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
 					t.Fatalf("Failed to parse response: %v", err)
 				}
 
@@ -173,7 +211,8 @@ func TestRegistrationHandler(t *testing.T) {
 			expectedCode: http.StatusBadRequest,
 			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var response utils.Response
-				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
 					t.Fatalf("Failed to parse response: %v", err)
 				}
 
@@ -188,7 +227,56 @@ func TestRegistrationHandler(t *testing.T) {
 			expectedCode: http.StatusBadRequest,
 			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var response utils.Response
-				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				if response.Error != "invalid request" {
+					t.Errorf("Expected error 'invalid request', got %q", response.Error)
+				}
+			},
+		},
+		{
+			name:         "Invalid Email Format",
+			inputJSON:    `{"username":"testuser1234","password":"Test12!!@@","email":"invalidemail"}`,
+			expectedCode: http.StatusBadRequest,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				if response.Error != "invalid request" {
+					t.Errorf("Expected error 'invalid request', got %q", response.Error)
+				}
+			},
+		},
+		{
+			name:         "Empty Username",
+			inputJSON:    `{"username":"","password":"Test12!!@@","email":"test@example.com"}`,
+			expectedCode: http.StatusBadRequest,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				if response.Error != "invalid request" {
+					t.Errorf("Expected error 'invalid request', got %q", response.Error)
+				}
+			},
+		},
+		{
+			name:         "Invalid JSON",
+			inputJSON:    `{"username":"testuser1234","password":"Test12!!@@","email":}`,
+			expectedCode: http.StatusBadRequest,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response utils.Response
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				if err != nil {
 					t.Fatalf("Failed to parse response: %v", err)
 				}
 
@@ -201,35 +289,57 @@ func TestRegistrationHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.setupFunc != nil {
-				if err := tt.setupFunc(); err != nil {
-					t.Fatalf("Setup failed: %v", err)
+			// Setup test data
+			if tt.setupTestData != nil {
+				if err := tt.setupTestData(t); err != nil {
+					t.Fatalf("Failed to setup test data: %v", err)
 				}
 			}
 
+			// Count documents before request
+			count, err := userRepo.MongoCollection.CountDocuments(context.Background(), bson.M{})
+			if err != nil {
+				t.Logf("Warning: Failed to count documents: %v", err)
+			}
+			t.Logf("Documents before test: %d", count)
+
+			// Create request
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(tt.inputJSON))
 			req.Header.Set("Content-Type", "application/json")
 
-			t.Logf("Test: %s", tt.name)
-			t.Logf("Making request with body: %s", tt.inputJSON)
+			// Log test information
+			t.Logf("Running test: %s", tt.name)
+			t.Logf("Request body: %s", tt.inputJSON)
 
-			count, _ := testClient.Database("tonotes_test").Collection("users").CountDocuments(context.Background(), bson.M{})
-			t.Logf("Documents in collection before request: %d", count)
-
+			// Execute request
 			router.ServeHTTP(w, req)
 
+			// Log response
 			t.Logf("Response Status: %d", w.Code)
 			t.Logf("Response Body: %s", w.Body.String())
 
-			count, _ = testClient.Database("tonotes_test").Collection("users").CountDocuments(context.Background(), bson.M{})
-			t.Logf("Documents in collection after request: %d", count)
-
+			// Check status code
 			if w.Code != tt.expectedCode {
 				t.Errorf("Expected status code %d, got %d", tt.expectedCode, w.Code)
 			}
 
+			// Check response
 			tt.checkResponse(t, w)
+
+			// Check database state if needed
+			if tt.checkDatabase != nil {
+				if err := tt.checkDatabase(t); err != nil {
+					t.Errorf("Database check failed: %v", err)
+				}
+			}
+
+			// Count documents after request
+			count, err = userRepo.MongoCollection.CountDocuments(context.Background(), bson.M{})
+			if err != nil {
+				t.Logf("Warning: Failed to count documents: %v", err)
+			}
+			t.Logf("Documents after test: %d", count)
 		})
 	}
 }

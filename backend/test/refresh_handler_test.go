@@ -1,42 +1,62 @@
 package test
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
 	"main/handler"
 	"main/services"
+	"main/test/testutils"
 	"main/utils"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func init() {
-	fmt.Println("Setting GO_ENV=test in init")
-	os.Setenv("GO_ENV", "test")
-	os.Setenv("JWT_SECRET_KEY", "test_secret_key")
-	os.Setenv("JWT_EXPIRATION_TIME", "3600")
-	os.Setenv("REFRESH_TOKEN_EXPIRATION_TIME", "604800")
+	testutils.SetupTestEnvironment()
+}
+
+// Helper function to create test tokens
+func createTestToken(t *testing.T, tokenType string, userID string) string {
+	if utils.JWTSecretKey == "" {
+		t.Fatal("JWT secret key not set")
+	}
+
+	claims := jwt.MapClaims{
+		"exp":     time.Now().Add(24 * time.Hour).Unix(),
+		"iat":     time.Now().Unix(),
+		"iss":     "toNotes",
+		"user_id": userID,
+	}
+
+	if tokenType == "refresh" {
+		claims["type"] = "refresh"
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(utils.JWTSecretKey))
+	if err != nil {
+		t.Fatalf("Failed to create %s token: %v", tokenType, err)
+	}
+
+	return tokenString
 }
 
 // Helper function to create Authorization header
 func createAuthHeader(t *testing.T, tokenType string) string {
 	switch tokenType {
 	case "valid_refresh":
-		token, err := services.GenerateRefreshToken("test-user-id")
-		if err != nil {
-			t.Fatalf("Failed to generate refresh token: %v", err)
-		}
+		token := createTestToken(t, "refresh", "test-user-id")
 		t.Logf("Generated refresh token: %s", token)
 		return "Bearer " + token
 	case "access_token":
-		token, err := services.GenerateToken("test-user-id")
-		if err != nil {
-			t.Fatalf("Failed to generate access token: %v", err)
-		}
+		token := createTestToken(t, "access", "test-user-id")
+		t.Logf("Generated access token: %s", token)
 		return "Bearer " + token
 	case "invalid":
 		return "Bearer invalid-token"
@@ -50,10 +70,55 @@ func createAuthHeader(t *testing.T, tokenType string) string {
 	}
 }
 
+func setupRefreshTest(t *testing.T) func() {
+	// Initialize Redis for token blacklist
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		t.Fatal("REDIS_URL environment variable not set")
+	}
+
+	var err error
+	services.TokenBlacklist, err = services.NewTokenBlacklist(redisURL)
+	if err != nil {
+		t.Fatalf("Failed to initialize token blacklist: %v", err)
+	}
+
+	// Verify Redis connection
+	ctx := context.Background()
+	if err := services.TokenBlacklist.Client.Ping(ctx).Err(); err != nil {
+		t.Fatalf("Failed to connect to Redis: %v", err)
+	}
+
+	return func() {
+		if services.TokenBlacklist != nil {
+			services.TokenBlacklist.Close()
+		}
+	}
+}
+
 func TestRefreshTokenHandler(t *testing.T) {
+	// Verify environment setup
+	testutils.VerifyTestEnvironment(t)
+
+	// Setup Redis
+	cleanup := setupRefreshTest(t)
+	defer cleanup()
+
+	// Verify JWT secret is set
+	if utils.JWTSecretKey == "" {
+		t.Fatal("JWT secret key not set")
+	}
+	t.Logf("Using JWT secret key (length: %d)", len(utils.JWTSecretKey))
+
+	// Setup Gin
 	gin.SetMode(gin.TestMode)
-	r := gin.Default()
-	r.POST("/refresh", handler.RefreshTokenHandler)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		t.Logf("Processing request: %s %s", c.Request.Method, c.Request.URL.Path)
+		t.Logf("Authorization header: %s", c.GetHeader("Authorization"))
+		c.Next()
+	})
+	router.POST("/refresh", handler.RefreshTokenHandler)
 
 	tests := []struct {
 		name          string
@@ -161,7 +226,7 @@ func TestRefreshTokenHandler(t *testing.T) {
 				req.Header.Set("Authorization", authHeader)
 			}
 
-			r.ServeHTTP(w, req)
+			router.ServeHTTP(w, req)
 
 			t.Logf("Response Status: %d", w.Code)
 			t.Logf("Response Body: %s", w.Body.String())

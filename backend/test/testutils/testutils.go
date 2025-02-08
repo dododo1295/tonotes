@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,37 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+// MockableTime is an interface for mocking time.Now() in tests
+type MockableTime interface {
+	Now() time.Time
+}
+
+// RealTime implements MockableTime using time.Now()
+type RealTime struct{}
+
+func (RealTime) Now() time.Time {
+	return time.Now()
+}
+
+// FixedTime implements MockableTime using a fixed time
+type FixedTime struct {
+	Fixed time.Time
+}
+
+func (ft FixedTime) Now() time.Time {
+	return ft.Fixed
+}
+
+// Helper function to set the mock time for tests
+func SetMockTime(mockTime MockableTime) {
+	mockTimeGlobal = mockTime
+}
+
+var mockTimeGlobal MockableTime = RealTime{} // Global variable to hold the time implementation
+
+// Add a mutex to protect environment variable access
+var envMutex sync.Mutex
 
 // SetupTestEnvironment sets up the test environment variables
 func SetupTestEnvironment() {
@@ -28,6 +60,9 @@ func SetupTestEnvironment() {
 	}
 
 	// Set test environment variables
+	envMutex.Lock()                               // Acquire the lock
+	defer envMutex.Unlock()                         // Release the lock when the function exits
+
 	os.Setenv("GO_ENV", "test")
 	os.Setenv("MONGO_USERNAME", "admin")
 	os.Setenv("MONGO_PASSWORD", "mongodblmpvBMCqJ3Ig2eX2oCTlNbf7TJ5533L80TvM8LC")
@@ -124,8 +159,12 @@ func SetupTestDB(t *testing.T) (*mongo.Client, func()) {
 		defer cancel()
 
 		// Drop test database
-		if err := client.Database(os.Getenv("MONGO_DB_TEST")).Drop(ctx); err != nil {
-			t.Logf("Warning: Failed to drop test database: %v", err)
+		dbName := os.Getenv("MONGO_DB_TEST") // Get the test database name
+
+		if dbName != "" {
+			if err := client.Database(dbName).Drop(ctx); err != nil {
+				t.Logf("Warning: Failed to drop test database %s: %v", dbName, err)
+			}
 		}
 
 		// Disconnect client

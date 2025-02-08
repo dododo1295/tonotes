@@ -4,11 +4,18 @@ import (
 	"context"
 	"fmt"
 	"main/services"
+	"main/test/testutils"
+	"main/utils"
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
 )
+
+func init() {
+	testutils.SetupTestEnvironment()
+}
 
 func setupTestRedis(t *testing.T) {
 	// Create a mock Redis client using a test server
@@ -35,6 +42,37 @@ func setupTestRedis(t *testing.T) {
 	if err := client.Ping(ctx).Err(); err != nil {
 		t.Fatalf("Failed to connect to Redis: %v", err)
 	}
+}
+
+func createTestJWTs(t *testing.T) (string, string) {
+	if utils.JWTSecretKey == "" {
+		t.Fatal("JWT secret key not set")
+	}
+
+	// Create tokens with future expiration
+	claims := jwt.MapClaims{
+		"exp":     time.Now().Add(24 * time.Hour).Unix(),
+		"iat":     time.Now().Unix(),
+		"iss":     "toNotes",
+		"user_id": "test-user",
+	}
+
+	// Create access token
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	accessTokenString, err := accessToken.SignedString([]byte(utils.JWTSecretKey))
+	if err != nil {
+		t.Fatalf("Failed to create access token: %v", err)
+	}
+
+	// Create refresh token
+	claims["type"] = "refresh"
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	refreshTokenString, err := refreshToken.SignedString([]byte(utils.JWTSecretKey))
+	if err != nil {
+		t.Fatalf("Failed to create refresh token: %v", err)
+	}
+
+	return accessTokenString, refreshTokenString
 }
 
 func TestRedisBlacklist(t *testing.T) {
@@ -95,9 +133,12 @@ func TestRedisBlacklist(t *testing.T) {
 			t.Fatalf("Failed to clear Redis: %v", err)
 		}
 
-		// Test tokens
-		accessToken := "test-access-token"
-		refreshToken := "test-refresh-token"
+		// Create valid JWT tokens for testing
+		accessToken, refreshToken := createTestJWTs(t)
+
+		t.Logf("Testing with tokens:")
+		t.Logf("Access Token: %s", accessToken)
+		t.Logf("Refresh Token: %s", refreshToken)
 
 		// Try to blacklist
 		err := services.BlacklistTokens(accessToken, refreshToken)
@@ -106,7 +147,7 @@ func TestRedisBlacklist(t *testing.T) {
 		}
 
 		// Debug: List all keys
-		keys, err := services.TokenBlacklist.Client.Keys(ctx, "*").Result()
+		keys, err := services.TokenBlacklist.Client.Keys(ctx, "blacklist:*").Result()
 		t.Logf("All keys in Redis after blacklisting: %v", keys)
 
 		// Check each key directly
@@ -121,6 +162,9 @@ func TestRedisBlacklist(t *testing.T) {
 			ttl, _ := services.TokenBlacklist.Client.TTL(ctx, accessKey).Result()
 			t.Logf("Access token value: %s, TTL: %v", val, ttl)
 		}
+		if accessExists == 0 {
+			t.Error("Access token not blacklisted")
+		}
 
 		// Debug refresh token
 		refreshExists, err := services.TokenBlacklist.Client.Exists(ctx, refreshKey).Result()
@@ -129,6 +173,9 @@ func TestRedisBlacklist(t *testing.T) {
 			val, _ := services.TokenBlacklist.Client.Get(ctx, refreshKey).Result()
 			ttl, _ := services.TokenBlacklist.Client.TTL(ctx, refreshKey).Result()
 			t.Logf("Refresh token value: %s, TTL: %v", val, ttl)
+		}
+		if refreshExists == 0 {
+			t.Error("Refresh token not blacklisted")
 		}
 	})
 }

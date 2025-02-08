@@ -128,10 +128,11 @@ func TestChangePasswordHandler(t *testing.T) {
 				"new_password": "AnotherPass789!!",
 			},
 			setupFunc: func() {
+
 				_, err := collection.UpdateOne(
 					context.Background(),
 					bson.M{"user_id": testUserID},
-					bson.M{"$set": bson.M{"lastPasswordChange": time.Now()}},
+					bson.M{"$set": bson.M{"lastPasswordChange": time.Now().Add(-1 * time.Hour)}},
 				)
 				if err != nil {
 					t.Fatalf("Failed to update LastPasswordChange: %v", err)
@@ -190,9 +191,6 @@ func TestChangePasswordHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.setupFunc != nil {
-				tt.setupFunc()
-			}
 
 			// Reset user state between tests
 			_, err := collection.UpdateOne(
@@ -205,6 +203,10 @@ func TestChangePasswordHandler(t *testing.T) {
 			)
 			if err != nil {
 				t.Fatalf("Failed to reset user state: %v", err)
+			}
+
+			if tt.setupFunc != nil {
+				tt.setupFunc()
 			}
 
 			jsonBody, err := json.Marshal(tt.requestBody)
