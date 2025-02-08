@@ -68,7 +68,7 @@ func Enable2FAHandler(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, gin.H{
+	utils.Success(c, gin.H{ // Modified
 		"message":        "2FA enabled successfully",
 		"recovery_codes": recoveryCodes, // Send plain text codes to user
 		"warning":        "Save these recovery codes securely. They will not be shown again.",
@@ -120,7 +120,7 @@ func UseRecoveryCodeHandler(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, gin.H{
+	utils.Success(c, gin.H{ // Modified
 		"message":         "Recovery code accepted",
 		"remaining_codes": len(newCodes),
 		"warning":         "Please set up a new authenticator app as soon as possible",
@@ -172,9 +172,10 @@ func Generate2FASecretHandler(c *gin.Context) {
 
 	qrCode := base64.StdEncoding.EncodeToString(buf.Bytes())
 
-	utils.Success(c, Enable2FAResponse{
-		Secret: key.Secret(),
-		QRCode: "data:image/png;base64," + qrCode,
+	utils.Success(c, gin.H{ // Modified
+		"secret":  key.Secret(),
+		"qr_code": "data:image/png;base64," + qrCode,
+		"message": "Successfully generated 2FA",
 	})
 }
 
@@ -208,7 +209,7 @@ func Verify2FAHandler(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, gin.H{"message": "2FA code valid"})
+	utils.Success(c, gin.H{"message": "2FA code valid"}) // Modified
 }
 
 // Disable2FAHandler disables 2FA for the user
@@ -249,5 +250,5 @@ func Disable2FAHandler(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, gin.H{"message": "2FA disabled successfully"})
+	utils.Success(c, gin.H{"message": "2FA disabled successfully"}) // Modified
 }
