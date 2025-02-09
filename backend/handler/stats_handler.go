@@ -11,23 +11,23 @@ import (
 )
 
 type StatsHandler struct {
-	userRepo     *repository.UserRepo
-	notesRepo    *repository.NotesRepo
-	todosService *usecase.TodosService // Changed from TodosRepo to TodosService
-	sessionRepo  *repository.SessionRepo
+	userRepo    *repository.UserRepo
+	noteRepo    *repository.NoteRepo
+	todoService *usecase.TodoService
+	sessionRepo *repository.SessionRepo
 }
 
 func NewStatsHandler(
 	userRepo *repository.UserRepo,
-	notesRepo *repository.NotesRepo,
-	todosService *usecase.TodosService,
+	noteRepo *repository.NoteRepo,
+	todoService *usecase.TodoService,
 	sessionRepo *repository.SessionRepo,
 ) *StatsHandler {
 	return &StatsHandler{
-		userRepo:     userRepo,
-		notesRepo:    notesRepo,
-		todosService: todosService,
-		sessionRepo:  sessionRepo,
+		userRepo:    userRepo,
+		noteRepo:    noteRepo,
+		todoService: todoService,
+		sessionRepo: sessionRepo,
 	}
 }
 
@@ -53,7 +53,7 @@ func (h *StatsHandler) GetUserStats(c *gin.Context) {
 	var stats model.UserStats
 
 	// Notes stats
-	totalNotes, err := h.notesRepo.CountUserNotes(userID.(string))
+	totalNotes, err := h.noteRepo.CountUserNotes(userID.(string))
 	if err != nil {
 		log.Printf("Error counting notes: %v", err)
 		utils.InternalError(c, "Failed to count notes")
@@ -61,7 +61,7 @@ func (h *StatsHandler) GetUserStats(c *gin.Context) {
 	}
 	stats.NotesStats.Total = totalNotes
 
-	archivedNotes, err := h.notesRepo.GetArchivedNotes(userID.(string))
+	archivedNotes, err := h.noteRepo.GetArchivedNotes(userID.(string))
 	if err != nil {
 		log.Printf("Error getting archived notes: %v", err)
 		utils.InternalError(c, "Failed to get archived notes")
@@ -69,7 +69,7 @@ func (h *StatsHandler) GetUserStats(c *gin.Context) {
 	}
 	stats.NotesStats.Archived = len(archivedNotes)
 
-	pinnedNotes, err := h.notesRepo.GetPinnedNotes(userID.(string))
+	pinnedNotes, err := h.noteRepo.GetPinnedNotes(userID.(string))
 	if err != nil {
 		log.Printf("Error getting pinned notes: %v", err)
 		utils.InternalError(c, "Failed to get pinned notes")
@@ -77,7 +77,7 @@ func (h *StatsHandler) GetUserStats(c *gin.Context) {
 	}
 	stats.NotesStats.Pinned = len(pinnedNotes)
 
-	tagCounts, err := h.notesRepo.CountNotesByTag(userID.(string))
+	tagCounts, err := h.noteRepo.CountNotesByTag(userID.(string))
 	if err != nil {
 		log.Printf("Error counting notes by tag: %v", err)
 		utils.InternalError(c, "Failed to count notes by tag")
@@ -86,7 +86,7 @@ func (h *StatsHandler) GetUserStats(c *gin.Context) {
 	stats.NotesStats.TagCounts = tagCounts
 
 	// Todos stats
-	completedTodos, err := h.todosService.GetCompletedTodos(ctx, userID.(string))
+	completedTodos, err := h.todoService.GetCompletedTodos(ctx, userID.(string))
 	if err != nil {
 		log.Printf("Error getting completed todos: %v", err)
 		utils.InternalError(c, "Failed to get completed todos")
@@ -94,7 +94,7 @@ func (h *StatsHandler) GetUserStats(c *gin.Context) {
 	}
 	stats.TodoStats.Completed = len(completedTodos)
 
-	pendingTodos, err := h.todosService.GetPendingTodos(ctx, userID.(string))
+	pendingTodos, err := h.todoService.GetPendingTodos(ctx, userID.(string))
 	if err != nil {
 		log.Printf("Error getting pending todos: %v", err)
 		utils.InternalError(c, "Failed to get pending todos")

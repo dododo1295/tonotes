@@ -12,15 +12,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type TodosHandler struct {
-	service *usecase.TodosService
+type TodoHandler struct {
+	service *usecase.TodoService
 }
 
-func NewTodosHandler(service *usecase.TodosService) *TodosHandler {
-	return &TodosHandler{service: service}
+func NewTodoHandler(service *usecase.TodoService) *TodoHandler {
+	return &TodoHandler{service: service}
 }
 
-func (h *TodosHandler) CreateTodo(c *gin.Context) {
+func (h *TodoHandler) CreateTodo(c *gin.Context) {
 	// Get authenticated user ID
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -48,7 +48,7 @@ func (h *TodosHandler) CreateTodo(c *gin.Context) {
 	}
 
 	// Initialize new todo with request data
-	todo := &model.Todos{
+	todo := &model.Todo{
 		UserID:            userID.(string),
 		TodoName:          req.TodoName,
 		Description:       req.Description,
@@ -121,7 +121,7 @@ func (h *TodosHandler) CreateTodo(c *gin.Context) {
 	utils.Created(c, response)
 }
 
-func (h *TodosHandler) GetUserTodos(c *gin.Context) {
+func (h *TodoHandler) GetUserTodos(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -138,7 +138,7 @@ func (h *TodosHandler) GetUserTodos(c *gin.Context) {
 	utils.Success(c, responses)
 }
 
-func (h *TodosHandler) UpdateTodo(c *gin.Context) {
+func (h *TodoHandler) UpdateTodo(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -151,7 +151,7 @@ func (h *TodosHandler) UpdateTodo(c *gin.Context) {
 		return
 	}
 
-	var updates model.Todos
+	var updates model.Todo
 	if err := c.ShouldBindJSON(&updates); err != nil {
 		utils.BadRequest(c, "Invalid request body")
 		return
@@ -167,7 +167,7 @@ func (h *TodosHandler) UpdateTodo(c *gin.Context) {
 	utils.Success(c, response)
 }
 
-func (h *TodosHandler) DeleteTodo(c *gin.Context) {
+func (h *TodoHandler) DeleteTodo(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -188,7 +188,7 @@ func (h *TodosHandler) DeleteTodo(c *gin.Context) {
 	utils.Success(c, gin.H{"message": "Todo deleted successfully"})
 }
 
-func (h *TodosHandler) SearchTodos(c *gin.Context) {
+func (h *TodoHandler) SearchTodos(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -206,7 +206,7 @@ func (h *TodosHandler) SearchTodos(c *gin.Context) {
 	utils.Success(c, responses)
 }
 
-func (h *TodosHandler) GetTodosByPriority(c *gin.Context) {
+func (h *TodoHandler) GetTodosByPriority(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -224,7 +224,7 @@ func (h *TodosHandler) GetTodosByPriority(c *gin.Context) {
 	utils.Success(c, responses)
 }
 
-func (h *TodosHandler) GetTodosByTags(c *gin.Context) {
+func (h *TodoHandler) GetTodosByTags(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -242,7 +242,7 @@ func (h *TodosHandler) GetTodosByTags(c *gin.Context) {
 	utils.Success(c, responses)
 }
 
-func (h *TodosHandler) GetUserTags(c *gin.Context) {
+func (h *TodoHandler) GetUserTags(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -258,7 +258,7 @@ func (h *TodosHandler) GetUserTags(c *gin.Context) {
 	utils.Success(c, tags)
 }
 
-func (h *TodosHandler) GetUpcomingTodos(c *gin.Context) {
+func (h *TodoHandler) GetUpcomingTodos(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -282,7 +282,7 @@ func (h *TodosHandler) GetUpcomingTodos(c *gin.Context) {
 	utils.Success(c, responses)
 }
 
-func (h *TodosHandler) GetOverdueTodos(c *gin.Context) {
+func (h *TodoHandler) GetOverdueTodos(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -299,7 +299,7 @@ func (h *TodosHandler) GetOverdueTodos(c *gin.Context) {
 	utils.Success(c, responses)
 }
 
-func (h *TodosHandler) ToggleTodoComplete(c *gin.Context) {
+func (h *TodoHandler) ToggleTodoComplete(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -322,7 +322,7 @@ func (h *TodosHandler) ToggleTodoComplete(c *gin.Context) {
 	utils.Success(c, response)
 }
 
-func (h *TodosHandler) UpdateDueDate(c *gin.Context) {
+func (h *TodoHandler) UpdateDueDate(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -354,7 +354,7 @@ func (h *TodosHandler) UpdateDueDate(c *gin.Context) {
 	utils.Success(c, response)
 }
 
-func (h *TodosHandler) UpdateReminder(c *gin.Context) {
+func (h *TodoHandler) UpdateReminder(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -386,7 +386,7 @@ func (h *TodosHandler) UpdateReminder(c *gin.Context) {
 	utils.Success(c, response)
 }
 
-func (h *TodosHandler) UpdatePriority(c *gin.Context) {
+func (h *TodoHandler) UpdatePriority(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -418,7 +418,7 @@ func (h *TodosHandler) UpdatePriority(c *gin.Context) {
 	utils.Success(c, response)
 }
 
-func (h *TodosHandler) GetCompletedTodos(c *gin.Context) {
+func (h *TodoHandler) GetCompletedTodos(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -435,7 +435,7 @@ func (h *TodosHandler) GetCompletedTodos(c *gin.Context) {
 	utils.Success(c, responses)
 }
 
-func (h *TodosHandler) GetPendingTodos(c *gin.Context) {
+func (h *TodoHandler) GetPendingTodos(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -452,7 +452,7 @@ func (h *TodosHandler) GetPendingTodos(c *gin.Context) {
 	utils.Success(c, responses)
 }
 
-func (h *TodosHandler) GetTodoStats(c *gin.Context) {
+func (h *TodoHandler) GetTodoStats(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -468,7 +468,7 @@ func (h *TodosHandler) GetTodoStats(c *gin.Context) {
 	utils.Success(c, stats)
 }
 
-func (h *TodosHandler) GetTodosWithReminders(c *gin.Context) {
+func (h *TodoHandler) GetTodosWithReminders(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -485,7 +485,7 @@ func (h *TodosHandler) GetTodosWithReminders(c *gin.Context) {
 	utils.Success(c, responses)
 }
 
-func (h *TodosHandler) UpdateTags(c *gin.Context) {
+func (h *TodoHandler) UpdateTags(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -516,7 +516,7 @@ func (h *TodosHandler) UpdateTags(c *gin.Context) {
 	response := dto.ToTodoResponse(updatedTodo)
 	utils.Success(c, response)
 }
-func (h *TodosHandler) UpdateToRecurring(c *gin.Context) {
+func (h *TodoHandler) UpdateToRecurring(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
@@ -549,7 +549,7 @@ func (h *TodosHandler) UpdateToRecurring(c *gin.Context) {
 	utils.Success(c, response)
 }
 
-func (h *TodosHandler) CountUserTodos(c *gin.Context) {
+func (h *TodoHandler) CountUserTodos(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.Unauthorized(c, "Missing user ID")
