@@ -5,6 +5,7 @@ import (
 	"main/model"
 	"main/usecase"
 	"main/utils"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,30 @@ func NewTodoHandler(service *usecase.TodoService) *TodoHandler {
 	return &TodoHandler{service: service}
 }
 
+// Function to generate HAL-style links for a Todo
+func (h *TodoHandler) getTodoLinks(baseURL string, todo *model.Todo) map[string]dto.TodoLink {
+	links := make(map[string]dto.TodoLink)
+	todoURL := baseURL + "/todo/" + todo.TodoID
+
+	links["self"] = dto.TodoLink{Href: todoURL, Method: http.MethodGet}
+	links["update"] = dto.TodoLink{Href: todoURL, Method: http.MethodPut}
+	links["delete"] = dto.TodoLink{Href: todoURL, Method: http.MethodDelete}
+
+	// Add complete and recurring task links
+	if !todo.Complete {
+		links["complete"] = dto.TodoLink{Href: todoURL + "/complete", Method: http.MethodPost}
+	}
+	if !todo.IsRecurring {
+		links["recurring"] = dto.TodoLink{Href: todoURL + "/recurring", Method: http.MethodPut}
+	}
+    links["priority"] = dto.TodoLink{Href: todoURL + "/priority", Method: http.MethodPut}
+    links["tag"] = dto.TodoLink{Href: todoURL + "/tag", Method: http.MethodPut}
+    links["due-date"] = dto.TodoLink{Href: todoURL + "/due-date", Method: http.MethodPut}
+    links["reminder"] = dto.TodoLink{Href: todoURL + "/reminder", Method: http.MethodPut}
+
+	return links
+}
+
 func (h *TodoHandler) CreateTodo(c *gin.Context) {
 	// Get authenticated user ID
 	userID, exists := c.Get("user_id")
@@ -27,6 +52,8 @@ func (h *TodoHandler) CreateTodo(c *gin.Context) {
 		utils.Unauthorized(c, "Missing user ID")
 		return
 	}
+
+    baseURL := utils.GetBaseURL(c)
 
 	// Define request structure matching model fields
 	var req struct {
@@ -115,9 +142,11 @@ func (h *TodoHandler) CreateTodo(c *gin.Context) {
 		utils.InternalError(c, err.Error())
 		return
 	}
+    // Get the resource related to the todo
+	links := h.getTodoLinks(baseURL, todo)
 
 	// Convert to response object and return
-	response := dto.ToTodoResponse(todo)
+	response := dto.ToTodoResponse(todo, links)
 	utils.Created(c, response)
 }
 
@@ -127,6 +156,7 @@ func (h *TodoHandler) GetUserTodos(c *gin.Context) {
 		utils.Unauthorized(c, "Missing user ID")
 		return
 	}
+	baseURL := utils.GetBaseURL(c)
 
 	todos, err := h.service.GetUserTodos(c.Request.Context(), userID.(string))
 	if err != nil {
@@ -134,7 +164,9 @@ func (h *TodoHandler) GetUserTodos(c *gin.Context) {
 		return
 	}
 
-	responses := dto.ToTodoResponses(todos)
+	responses := dto.ToTodoResponses(todos, func(todo *model.Todo) map[string]dto.TodoLink {
+        return h.getTodoLinks(baseURL, todo)
+    })
 	utils.Success(c, responses)
 }
 
@@ -150,6 +182,7 @@ func (h *TodoHandler) UpdateTodo(c *gin.Context) {
 		utils.BadRequest(c, "Missing todo ID")
 		return
 	}
+    baseURL := utils.GetBaseURL(c)
 
 	var updates model.Todo
 	if err := c.ShouldBindJSON(&updates); err != nil {
@@ -162,8 +195,9 @@ func (h *TodoHandler) UpdateTodo(c *gin.Context) {
 		utils.InternalError(c, err.Error())
 		return
 	}
+    links := h.getTodoLinks(baseURL, updatedTodo)
 
-	response := dto.ToTodoResponse(updatedTodo)
+	response := dto.ToTodoResponse(updatedTodo, links)
 	utils.Success(c, response)
 }
 
@@ -194,6 +228,7 @@ func (h *TodoHandler) SearchTodos(c *gin.Context) {
 		utils.Unauthorized(c, "Missing user ID")
 		return
 	}
+    baseURL := utils.GetBaseURL(c)
 
 	searchText := c.Query("q")
 	todos, err := h.service.SearchTodos(c.Request.Context(), userID.(string), searchText)
@@ -202,7 +237,9 @@ func (h *TodoHandler) SearchTodos(c *gin.Context) {
 		return
 	}
 
-	responses := dto.ToTodoResponses(todos)
+	responses := dto.ToTodoResponses(todos, func(todo *model.Todo) map[string]dto.TodoLink {
+        return h.getTodoLinks(baseURL, todo)
+    })
 	utils.Success(c, responses)
 }
 
@@ -212,6 +249,7 @@ func (h *TodoHandler) GetTodosByPriority(c *gin.Context) {
 		utils.Unauthorized(c, "Missing user ID")
 		return
 	}
+    baseURL := utils.GetBaseURL(c)
 
 	priority := model.Priority(c.Query("priority"))
 	todos, err := h.service.GetTodosByPriority(c.Request.Context(), userID.(string), priority)
@@ -220,7 +258,9 @@ func (h *TodoHandler) GetTodosByPriority(c *gin.Context) {
 		return
 	}
 
-	responses := dto.ToTodoResponses(todos)
+	responses := dto.ToTodoResponses(todos, func(todo *model.Todo) map[string]dto.TodoLink {
+        return h.getTodoLinks(baseURL, todo)
+    })
 	utils.Success(c, responses)
 }
 
@@ -230,6 +270,7 @@ func (h *TodoHandler) GetTodosByTags(c *gin.Context) {
 		utils.Unauthorized(c, "Missing user ID")
 		return
 	}
+    baseURL := utils.GetBaseURL(c)
 
 	tags := c.QueryArray("tags")
 	todos, err := h.service.GetTodosByTags(c.Request.Context(), userID.(string), tags)
@@ -238,24 +279,10 @@ func (h *TodoHandler) GetTodosByTags(c *gin.Context) {
 		return
 	}
 
-	responses := dto.ToTodoResponses(todos)
+	responses := dto.ToTodoResponses(todos, func(todo *model.Todo) map[string]dto.TodoLink {
+        return h.getTodoLinks(baseURL, todo)
+    })
 	utils.Success(c, responses)
-}
-
-func (h *TodoHandler) GetUserTags(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		utils.Unauthorized(c, "Missing user ID")
-		return
-	}
-
-	tags, err := h.service.GetUserTags(c.Request.Context(), userID.(string))
-	if err != nil {
-		utils.InternalError(c, err.Error())
-		return
-	}
-
-	utils.Success(c, tags)
 }
 
 func (h *TodoHandler) GetUpcomingTodos(c *gin.Context) {
@@ -264,6 +291,7 @@ func (h *TodoHandler) GetUpcomingTodos(c *gin.Context) {
 		utils.Unauthorized(c, "Missing user ID")
 		return
 	}
+    baseURL := utils.GetBaseURL(c)
 
 	daysStr := c.DefaultQuery("days", "7")
 	days, err := strconv.Atoi(daysStr)
@@ -278,7 +306,9 @@ func (h *TodoHandler) GetUpcomingTodos(c *gin.Context) {
 		return
 	}
 
-	responses := dto.ToTodoResponses(todos)
+	responses := dto.ToTodoResponses(todos, func(todo *model.Todo) map[string]dto.TodoLink {
+        return h.getTodoLinks(baseURL, todo)
+    })
 	utils.Success(c, responses)
 }
 
@@ -288,6 +318,7 @@ func (h *TodoHandler) GetOverdueTodos(c *gin.Context) {
 		utils.Unauthorized(c, "Missing user ID")
 		return
 	}
+    baseURL := utils.GetBaseURL(c)
 
 	todos, err := h.service.GetOverdueTodos(c.Request.Context(), userID.(string))
 	if err != nil {
@@ -295,177 +326,10 @@ func (h *TodoHandler) GetOverdueTodos(c *gin.Context) {
 		return
 	}
 
-	responses := dto.ToTodoResponses(todos)
+	responses := dto.ToTodoResponses(todos, func(todo *model.Todo) map[string]dto.TodoLink {
+        return h.getTodoLinks(baseURL, todo)
+    })
 	utils.Success(c, responses)
-}
-
-func (h *TodoHandler) ToggleTodoComplete(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		utils.Unauthorized(c, "Missing user ID")
-		return
-	}
-
-	todoID := c.Param("id")
-	if todoID == "" {
-		utils.BadRequest(c, "Missing todo ID")
-		return
-	}
-
-	updatedTodo, err := h.service.ToggleTodoComplete(c.Request.Context(), todoID, userID.(string))
-	if err != nil {
-		utils.InternalError(c, err.Error())
-		return
-	}
-
-	response := dto.ToTodoResponse(updatedTodo)
-	utils.Success(c, response)
-}
-
-func (h *TodoHandler) UpdateDueDate(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		utils.Unauthorized(c, "Missing user ID")
-		return
-	}
-
-	todoID := c.Param("id")
-	if todoID == "" {
-		utils.BadRequest(c, "Missing todo ID")
-		return
-	}
-
-	var req struct {
-		DueDate time.Time `json:"due_date"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.BadRequest(c, "Invalid due date")
-		return
-	}
-
-	updatedTodo, err := h.service.UpdateDueDate(c.Request.Context(), todoID, userID.(string), req.DueDate)
-	if err != nil {
-		utils.InternalError(c, err.Error())
-		return
-	}
-
-	response := dto.ToTodoResponse(updatedTodo)
-	utils.Success(c, response)
-}
-
-func (h *TodoHandler) UpdateReminder(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		utils.Unauthorized(c, "Missing user ID")
-		return
-	}
-
-	todoID := c.Param("id")
-	if todoID == "" {
-		utils.BadRequest(c, "Missing todo ID")
-		return
-	}
-
-	var req struct {
-		ReminderAt time.Time `json:"reminder_at"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.BadRequest(c, "Invalid reminder time")
-		return
-	}
-
-	updatedTodo, err := h.service.UpdateReminder(c.Request.Context(), todoID, userID.(string), req.ReminderAt)
-	if err != nil {
-		utils.InternalError(c, err.Error())
-		return
-	}
-
-	response := dto.ToTodoResponse(updatedTodo)
-	utils.Success(c, response)
-}
-
-func (h *TodoHandler) UpdatePriority(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		utils.Unauthorized(c, "Missing user ID")
-		return
-	}
-
-	todoID := c.Param("id")
-	if todoID == "" {
-		utils.BadRequest(c, "Missing todo ID")
-		return
-	}
-
-	var req struct {
-		Priority model.Priority `json:"priority"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.BadRequest(c, "Invalid priority")
-		return
-	}
-
-	updatedTodo, err := h.service.UpdatePriority(c.Request.Context(), todoID, userID.(string), req.Priority)
-	if err != nil {
-		utils.InternalError(c, err.Error())
-		return
-	}
-
-	response := dto.ToTodoResponse(updatedTodo)
-	utils.Success(c, response)
-}
-
-func (h *TodoHandler) GetCompletedTodos(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		utils.Unauthorized(c, "Missing user ID")
-		return
-	}
-
-	todos, err := h.service.GetCompletedTodos(c.Request.Context(), userID.(string))
-	if err != nil {
-		utils.InternalError(c, err.Error())
-		return
-	}
-
-	responses := dto.ToTodoResponses(todos)
-	utils.Success(c, responses)
-}
-
-func (h *TodoHandler) GetPendingTodos(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		utils.Unauthorized(c, "Missing user ID")
-		return
-	}
-
-	todos, err := h.service.GetPendingTodos(c.Request.Context(), userID.(string))
-	if err != nil {
-		utils.InternalError(c, err.Error())
-		return
-	}
-
-	responses := dto.ToTodoResponses(todos)
-	utils.Success(c, responses)
-}
-
-func (h *TodoHandler) GetTodoStats(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		utils.Unauthorized(c, "Missing user ID")
-		return
-	}
-
-	stats, err := h.service.GetTodoStats(c.Request.Context(), userID.(string))
-	if err != nil {
-		utils.InternalError(c, err.Error())
-		return
-	}
-
-	utils.Success(c, stats)
 }
 
 func (h *TodoHandler) GetTodosWithReminders(c *gin.Context) {
@@ -474,6 +338,7 @@ func (h *TodoHandler) GetTodosWithReminders(c *gin.Context) {
 		utils.Unauthorized(c, "Missing user ID")
 		return
 	}
+    baseURL := utils.GetBaseURL(c)
 
 	todos, err := h.service.GetTodosWithReminders(c.Request.Context(), userID.(string))
 	if err != nil {
@@ -481,86 +346,211 @@ func (h *TodoHandler) GetTodosWithReminders(c *gin.Context) {
 		return
 	}
 
-	responses := dto.ToTodoResponses(todos)
+	responses := dto.ToTodoResponses(todos, func(todo *model.Todo) map[string]dto.TodoLink {
+        return h.getTodoLinks(baseURL, todo)
+    })
 	utils.Success(c, responses)
 }
 
+func (h *TodoHandler) ToggleTodoComplete(c *gin.Context) {
+    userID, exists := c.Get("user_id")
+    if !exists {
+        utils.Unauthorized(c, "Missing user ID")
+        return
+    }
+
+    todoID := c.Param("id")
+    if todoID == "" {
+        utils.BadRequest(c, "Missing todo ID")
+        return
+    }
+    baseURL := utils.GetBaseURL(c)
+
+    updatedTodo, err := h.service.ToggleTodoComplete(c.Request.Context(), todoID, userID.(string))
+    if err != nil {
+        utils.InternalError(c, err.Error())
+        return
+    }
+	links := h.getTodoLinks(baseURL, updatedTodo)
+
+    response := dto.ToTodoResponse(updatedTodo, links)
+    utils.Success(c, response)
+}
+
+func (h *TodoHandler) UpdateDueDate(c *gin.Context) {
+    userID, exists := c.Get("user_id")
+    if !exists {
+        utils.Unauthorized(c, "Missing user ID")
+        return
+    }
+
+    todoID := c.Param("id")
+    if todoID == "" {
+        utils.BadRequest(c, "Missing todo ID")
+        return
+    }
+    baseURL := utils.GetBaseURL(c)
+
+    var req struct {
+        DueDate time.Time `json:"due_date"`
+    }
+
+    if err := c.ShouldBindJSON(&req); err != nil {
+        utils.BadRequest(c, "Invalid due date")
+        return
+    }
+
+    updatedTodo, err := h.service.UpdateDueDate(c.Request.Context(), todoID, userID.(string), req.DueDate)
+    if err != nil {
+        utils.InternalError(c, err.Error())
+        return
+    }
+	links := h.getTodoLinks(baseURL, updatedTodo)
+
+    response := dto.ToTodoResponse(updatedTodo, links)
+    utils.Success(c, response)
+
+}
+
+func (h *TodoHandler) UpdateReminder(c *gin.Context) {
+    userID, exists := c.Get("user_id")
+    if !exists {
+        utils.Unauthorized(c, "Missing user ID")
+        return
+    }
+
+    todoID := c.Param("id")
+    if todoID == "" {
+        utils.BadRequest(c, "Missing todo ID")
+        return
+    }
+    baseURL := utils.GetBaseURL(c)
+
+
+    var req struct {
+        ReminderAt time.Time `json:"reminder_at"`
+    }
+
+    if err := c.ShouldBindJSON(&req); err != nil {
+        utils.BadRequest(c, "Invalid reminder time")
+        return
+    }
+
+    updatedTodo, err := h.service.UpdateReminder(c.Request.Context(), todoID, userID.(string), req.ReminderAt)
+    if err != nil {
+        utils.InternalError(c, err.Error())
+        return
+    }
+    links := h.getTodoLinks(baseURL, updatedTodo)
+
+    response := dto.ToTodoResponse(updatedTodo, links)
+    utils.Success(c, response)
+
+}
+
+func (h *TodoHandler) UpdatePriority(c *gin.Context) {
+    userID, exists := c.Get("user_id")
+    if !exists {
+        utils.Unauthorized(c, "Missing user ID")
+        return
+    }
+
+    todoID := c.Param("id")
+    if todoID == "" {
+        utils.BadRequest(c, "Missing todo ID")
+        return
+    }
+    baseURL := utils.GetBaseURL(c)
+
+    var req struct {
+        Priority model.Priority `json:"priority"`
+    }
+
+    if err := c.ShouldBindJSON(&req); err != nil {
+        utils.BadRequest(c, "Invalid priority")
+        return
+    }
+
+    updatedTodo, err := h.service.UpdatePriority(c.Request.Context(), todoID, userID.(string), req.Priority)
+    if err != nil {
+        utils.InternalError(c, err.Error())
+        return
+    }
+
+    links := h.getTodoLinks(baseURL, updatedTodo)
+
+    response := dto.ToTodoResponse(updatedTodo, links)
+    utils.Success(c, response)
+}
+
 func (h *TodoHandler) UpdateTags(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		utils.Unauthorized(c, "Missing user ID")
-		return
-	}
+    userID, exists := c.Get("user_id")
+    if !exists {
+        utils.Unauthorized(c, "Missing user ID")
+        return
+    }
 
-	todoID := c.Param("id")
-	if todoID == "" {
-		utils.BadRequest(c, "Missing todo ID")
-		return
-	}
+    todoID := c.Param("id")
+    if todoID == "" {
+        utils.BadRequest(c, "Missing todo ID")
+        return
+    }
+    baseURL := utils.GetBaseURL(c)
 
-	var req struct {
-		Tags []string `json:"tags"`
-	}
+    var req struct {
+        Tags []string `json:"tags"`
+    }
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.BadRequest(c, "Invalid tags")
-		return
-	}
+    if err := c.ShouldBindJSON(&req); err != nil {
+        utils.BadRequest(c, "Invalid tags")
+        return
+    }
 
-	updatedTodo, err := h.service.UpdateTags(c.Request.Context(), todoID, userID.(string), req.Tags)
-	if err != nil {
-		utils.InternalError(c, err.Error())
-		return
-	}
+    updatedTodo, err := h.service.UpdateTags(c.Request.Context(), todoID, userID.(string), req.Tags)
+    if err != nil {
+        utils.InternalError(c, err.Error())
+        return
+    }
+    links := h.getTodoLinks(baseURL, updatedTodo)
 
-	response := dto.ToTodoResponse(updatedTodo)
-	utils.Success(c, response)
+    response := dto.ToTodoResponse(updatedTodo, links)
+    utils.Success(c, response)
 }
+
 func (h *TodoHandler) UpdateToRecurring(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		utils.Unauthorized(c, "Missing user ID")
-		return
-	}
+    userID, exists := c.Get("user_id")
+    if !exists {
+        utils.Unauthorized(c, "Missing user ID")
+        return
+    }
 
-	todoID := c.Param("id")
-	if todoID == "" {
-		utils.BadRequest(c, "Missing todo ID")
-		return
-	}
+    todoID := c.Param("id")
+    if todoID == "" {
+        utils.BadRequest(c, "Missing todo ID")
+        return
+    }
+    baseURL := utils.GetBaseURL(c)
 
-	var req struct {
-		Pattern model.RecurrencePattern `json:"pattern"`
-		EndDate time.Time               `json:"end_date"`
-	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.BadRequest(c, "Invalid recurrence data")
-		return
-	}
+    var req struct {
+        Pattern model.RecurrencePattern `json:"pattern"`
+        EndDate time.Time               `json:"end_date"`
+    }
 
-	updatedTodo, err := h.service.UpdateToRecurring(c.Request.Context(), todoID, userID.(string), req.Pattern, req.EndDate)
-	if err != nil {
-		utils.InternalError(c, err.Error())
-		return
-	}
+    if err := c.ShouldBindJSON(&req); err != nil {
+        utils.BadRequest(c, "Invalid recurrence data")
+        return
+    }
 
-	response := dto.ToTodoResponse(updatedTodo)
-	utils.Success(c, response)
-}
+    updatedTodo, err := h.service.UpdateToRecurring(c.Request.Context(), todoID, userID.(string), req.Pattern, req.EndDate)
+    if err != nil {
+        utils.InternalError(c, err.Error())
+        return
+    }
 
-func (h *TodoHandler) CountUserTodos(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		utils.Unauthorized(c, "Missing user ID")
-		return
-	}
+	links := h.getTodoLinks(baseURL, updatedTodo)
 
-	count, err := h.service.CountUserTodos(c.Request.Context(), userID.(string))
-	if err != nil {
-		utils.InternalError(c, err.Error())
-		return
-	}
+    response := dto.ToTodoResponse(updatedTodo, links)
+    utils.Success(c, response)
 
-	utils.Success(c, gin.H{"count": count})
 }

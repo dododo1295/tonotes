@@ -5,6 +5,7 @@ import (
 	"main/model"
 	"main/usecase"
 	"main/utils"
+	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -19,8 +20,24 @@ func NewNoteHandler(service *usecase.NoteService) *NoteHandler {
 		service: service,
 	}
 }
+
+func (h *NoteHandler) getNoteLinks(baseURL string, note *model.Note) map[string]dto.NoteLink {
+	links := make(map[string]dto.NoteLink)
+	noteURL := baseURL + "/note/" + note.ID
+
+	links["self"] = dto.NoteLink{Href: noteURL, Method: http.MethodGet}
+	links["update"] = dto.NoteLink{Href: noteURL, Method: http.MethodPut}
+	links["delete"] = dto.NoteLink{Href: noteURL, Method: http.MethodDelete}
+	links["favorite"] = dto.NoteLink{Href: noteURL + "/favorite", Method: http.MethodPost}
+	links["pin"] = dto.NoteLink{Href: noteURL + "/pin", Method: http.MethodPost}
+	links["archive"] = dto.NoteLink{Href: noteURL + "/archive", Method: http.MethodPost}
+	links["pin-position"] = dto.NoteLink{Href: noteURL + "/pin-position", Method: http.MethodPut}
+
+	return links
+}
 func (h *NoteHandler) SearchNotes(c *gin.Context) {
 	userID := c.GetString("userID")
+	baseURL := utils.GetBaseURL(c)
 
 	query := c.Query("q")
 	tags := c.QueryArray("tags")
@@ -48,35 +65,50 @@ func (h *NoteHandler) SearchNotes(c *gin.Context) {
 		return
 	}
 
+	responseLinks := map[string]dto.NoteLink{
+		"self":   {Href: baseURL + "/note", Method: http.MethodGet},
+		"create": {Href: baseURL + "/note", Method: http.MethodPost},
+	}
+
 	response := dto.NewNotesPageResponse(
 		notes,
 		totalCount,
 		(totalCount+pageSize-1)/pageSize,
 		page,
+		responseLinks,
+		func(note *model.Note) map[string]dto.NoteLink {
+			return h.getNoteLinks(baseURL, note)
+		},
 	)
 	utils.Success(c, response)
 }
 
 func (h *NoteHandler) CreateNote(c *gin.Context) {
+	userID := c.GetString("userID")
+	baseURL := utils.GetBaseURL(c)
+
 	var note model.Note
 	if err := c.ShouldBindJSON(&note); err != nil {
 		utils.BadRequest(c, "Invalid request body")
 		return
 	}
 
-	note.UserID = c.GetString("userID")
+	note.UserID = userID
 	if err := h.service.CreateNote(c, &note); err != nil {
 		utils.BadRequest(c, err.Error())
 		return
 	}
 
-	response := dto.ToNoteResponse(&note)
+	links := h.getNoteLinks(baseURL, &note) // Pass a pointer to note
+
+	response := dto.ToNoteResponse(&note, links)
 	utils.Success(c, response)
 }
 
 func (h *NoteHandler) UpdateNote(c *gin.Context) {
 	noteID := c.Param("id")
 	userID := c.GetString("userID")
+	baseURL := utils.GetBaseURL(c)
 
 	var updates model.Note
 	if err := c.ShouldBindJSON(&updates); err != nil {
@@ -89,7 +121,144 @@ func (h *NoteHandler) UpdateNote(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, gin.H{"message": "Note updated successfully"})
+	// Fetch the updated note to generate links based on the updated state
+	note, err := h.service.NoteRepo.GetNote(noteID, userID)
+	if err != nil {
+		utils.InternalError(c, "Failed to fetch updated note")
+		return
+	}
+
+	links := h.getNoteLinks(baseURL, note)
+	response := dto.ToNoteResponse(note, links)
+	utils.Success(c, response)
+
+}
+
+func (h *NoteHandler) GetUserNotes(c *gin.Context) {
+	userID := c.GetString("userID")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "0"))
+	baseURL := utils.GetBaseURL(c)
+
+	notes, totalCount, err := h.service.GetUserNotes(c, userID, limit)
+	if err != nil {
+		utils.BadRequest(c, err.Error())
+		return
+	}
+
+	pageSize := limit
+	if pageSize == 0 {
+		pageSize = len(notes)
+	}
+
+	responseLinks := map[string]dto.NoteLink{
+		"self":   {Href: baseURL + "/note", Method: http.MethodGet},
+		"create": {Href: baseURL + "/note", Method: http.MethodPost},
+	}
+
+	response := dto.NewNotesPageResponse(
+		notes,
+		totalCount,
+		(totalCount+pageSize-1)/pageSize,
+		1,
+		responseLinks,
+		func(note *model.Note) map[string]dto.NoteLink {
+			return h.getNoteLinks(baseURL, note)
+		},
+	)
+	utils.Success(c, response)
+}
+
+func (h *NoteHandler) GetArchivedNotes(c *gin.Context) {
+	userID := c.GetString("userID")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	baseURL := utils.GetBaseURL(c)
+
+	notes, totalCount, err := h.service.GetArchivedNotes(c, userID, page, pageSize)
+	if err != nil {
+		utils.BadRequest(c, err.Error())
+		return
+	}
+
+	responseLinks := map[string]dto.NoteLink{
+		"self": {Href: baseURL + "/note/archived", Method: http.MethodGet},
+	}
+
+	response := dto.NewNotesPageResponse(
+		notes,
+		totalCount,
+		(totalCount+pageSize-1)/pageSize,
+		page,
+		responseLinks,
+		func(note *model.Note) map[string]dto.NoteLink {
+			return h.getNoteLinks(baseURL, note)
+		},
+	)
+	utils.Success(c, response)
+}
+func (h *NoteHandler) ToggleFavorite(c *gin.Context) {
+	noteID := c.Param("id")
+	userID := c.GetString("userID")
+	baseURL := utils.GetBaseURL(c)
+
+	if err := h.service.ToggleFavorite(c, noteID, userID); err != nil {
+		utils.BadRequest(c, err.Error())
+		return
+	}
+
+	note, err := h.service.NoteRepo.GetNote(noteID, userID)
+	if err != nil {
+		utils.InternalError(c, "Failed to fetch updated note")
+		return
+	}
+
+	links := h.getNoteLinks(baseURL, note)
+	response := dto.ToNoteResponse(note, links)
+	utils.Success(c, response)
+
+}
+
+func (h *NoteHandler) TogglePin(c *gin.Context) {
+	noteID := c.Param("id")
+	userID := c.GetString("userID")
+	baseURL := utils.GetBaseURL(c)
+
+	if err := h.service.ToggleNotePin(c, noteID, userID); err != nil {
+		utils.BadRequest(c, err.Error())
+		return
+	}
+
+	note, err := h.service.NoteRepo.GetNote(noteID, userID)
+	if err != nil {
+		utils.InternalError(c, "Failed to fetch updated note")
+		return
+	}
+
+	links := h.getNoteLinks(baseURL, note)
+	response := dto.ToNoteResponse(note, links)
+	utils.Success(c, response)
+}
+
+func (h *NoteHandler) ArchiveNote(c *gin.Context) {
+	noteID := c.Param("id")
+	userID := c.GetString("userID")
+	baseURL := utils.GetBaseURL(c)
+
+	if err := h.service.ArchiveNote(c, noteID, userID); err != nil {
+		utils.BadRequest(c, err.Error())
+		return
+	}
+
+	note, err := h.service.NoteRepo.GetNote(noteID, userID)
+	if err != nil {
+		utils.InternalError(c, "Failed to fetch updated note")
+		return
+	}
+
+	links := h.getNoteLinks(baseURL, note)
+	response := dto.ToNoteResponse(note, links)
+	utils.Success(c, response)
+
 }
 
 func (h *NoteHandler) DeleteNote(c *gin.Context) {
@@ -104,114 +273,10 @@ func (h *NoteHandler) DeleteNote(c *gin.Context) {
 	utils.Success(c, gin.H{"message": "Note deleted successfully"})
 }
 
-func (h *NoteHandler) ToggleFavorite(c *gin.Context) {
-	noteID := c.Param("id")
-	userID := c.GetString("userID")
-
-	if err := h.service.ToggleFavorite(c, noteID, userID); err != nil {
-		utils.BadRequest(c, err.Error())
-		return
-	}
-
-	utils.Success(c, gin.H{"message": "Note favorite status toggled successfully"})
-}
-
-func (h *NoteHandler) TogglePin(c *gin.Context) {
-	noteID := c.Param("id")
-	userID := c.GetString("userID")
-
-	if err := h.service.ToggleNotePin(c, noteID, userID); err != nil {
-		utils.BadRequest(c, err.Error())
-		return
-	}
-
-	utils.Success(c, gin.H{"message": "Note pin status toggled successfully"})
-}
-
-func (h *NoteHandler) ArchiveNote(c *gin.Context) {
-	noteID := c.Param("id")
-	userID := c.GetString("userID")
-
-	if err := h.service.ArchiveNote(c, noteID, userID); err != nil {
-		utils.BadRequest(c, err.Error())
-		return
-	}
-
-	utils.Success(c, gin.H{"message": "Note archived successfully"})
-}
-
-func (h *NoteHandler) GetUserTags(c *gin.Context) {
-	userID := c.GetString("userID")
-
-	tags, err := h.service.GetUserTags(c, userID)
-	if err != nil {
-		utils.BadRequest(c, err.Error())
-		return
-	}
-
-	utils.Success(c, tags)
-}
-
-func (h *NoteHandler) GetSearchSuggestions(c *gin.Context) {
-	userID := c.GetString("userID")
-	prefix := c.Query("prefix")
-
-	suggestions, err := h.service.GetSearchSuggestions(userID, prefix)
-	if err != nil {
-		utils.BadRequest(c, err.Error())
-		return
-	}
-
-	utils.Success(c, suggestions)
-}
-
-func (h *NoteHandler) GetUserNotes(c *gin.Context) {
-	userID := c.GetString("userID")
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "0"))
-
-	notes, totalCount, err := h.service.GetUserNotes(c, userID, limit)
-	if err != nil {
-		utils.BadRequest(c, err.Error())
-		return
-	}
-
-	pageSize := limit
-	if pageSize == 0 {
-		pageSize = len(notes)
-	}
-
-	response := dto.NewNotesPageResponse(
-		notes,
-		totalCount,
-		(totalCount+pageSize-1)/pageSize,
-		1,
-	)
-	utils.Success(c, response)
-}
-
-func (h *NoteHandler) GetArchivedNotes(c *gin.Context) {
-	userID := c.GetString("userID")
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
-
-	notes, totalCount, err := h.service.GetArchivedNotes(c, userID, page, pageSize)
-	if err != nil {
-		utils.BadRequest(c, err.Error())
-		return
-	}
-
-	response := dto.NewNotesPageResponse(
-		notes,
-		totalCount,
-		(totalCount+pageSize-1)/pageSize,
-		page,
-	)
-	utils.Success(c, response)
-}
-
 func (h *NoteHandler) UpdatePinPosition(c *gin.Context) {
 	noteID := c.Param("id")
 	userID := c.GetString("userID")
+	baseURL := utils.GetBaseURL(c)
 
 	var req struct {
 		Position int `json:"position"`
@@ -227,30 +292,13 @@ func (h *NoteHandler) UpdatePinPosition(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, gin.H{"message": "Pin position updated successfully"})
-}
-
-func (h *NoteHandler) GetAllUserTags(c *gin.Context) {
-	userID := c.GetString("userID")
-
-	tags, err := h.service.GetAllUserTags(c, userID)
+	note, err := h.service.NoteRepo.GetNote(noteID, userID)
 	if err != nil {
-		utils.BadRequest(c, err.Error())
+		utils.InternalError(c, "Failed to fetch updated note")
 		return
 	}
-
-	utils.Success(c, tags)
-}
-
-func (h *NoteHandler) GetPinnedNotes(c *gin.Context) {
-	userID := c.GetString("userID")
-
-	notes, err := h.service.GetPinnedNotes(c.Request.Context(), userID)
-	if err != nil {
-		utils.BadRequest(c, err.Error())
-		return
-	}
-
-	response := dto.ToNoteResponses(notes)
+	links := h.getNoteLinks(baseURL, note)
+	response := dto.ToNoteResponse(note, links)
 	utils.Success(c, response)
+
 }
