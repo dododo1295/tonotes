@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-type NotesService struct {
-	NotesRepo *repository.NotesRepo
+type NoteService struct {
+	NoteRepo *repository.NoteRepo
 }
 
 // Searching/Filtering options for notes
@@ -27,15 +27,15 @@ type NoteSearchOptions struct {
 	PageSize  int
 }
 
-type NotesResponse struct {
-	Notes       []*model.Notes
+type NoteResponse struct {
+	Notes       []*model.Note
 	TotalCount  int
 	PageCount   int
 	CurrentPage int
 }
 
 // helper functions
-func sortNotes(notes []*model.Notes, sortBy string, sortOrder string) {
+func sortNotes(notes []*model.Note, sortBy string, sortOrder string) {
 	sort.Slice(notes, func(i, j int) bool {
 		descending := sortOrder == "desc"
 		switch sortBy {
@@ -58,7 +58,7 @@ func sortNotes(notes []*model.Notes, sortBy string, sortOrder string) {
 	})
 }
 
-func (s *NotesService) validateNote(note *model.Notes) error {
+func (s *NoteService) validateNote(note *model.Note) error {
 	// Normalize title
 	note.Title = strings.TrimSpace(note.Title)
 	if note.Title == "" {
@@ -98,7 +98,7 @@ func (s *NotesService) validateNote(note *model.Notes) error {
 }
 
 // service functions
-func (svc *NotesService) SearchNotes(ctx context.Context, opts NoteSearchOptions) ([]*model.Notes, int, error) {
+func (svc *NoteService) SearchNotes(ctx context.Context, opts NoteSearchOptions) ([]*model.Note, int, error) {
 	// Basic validation
 	if opts.UserID == "" {
 		return nil, 0, errors.New("user ID is required")
@@ -123,7 +123,7 @@ func (svc *NotesService) SearchNotes(ctx context.Context, opts NoteSearchOptions
 	}
 
 	// Get notes from repository
-	notes, err := svc.NotesRepo.FindNotes(ctx, repoOpts)
+	notes, err := svc.NoteRepo.FindNotes(ctx, repoOpts)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to search notes: %w", err)
 	}
@@ -133,7 +133,7 @@ func (svc *NotesService) SearchNotes(ctx context.Context, opts NoteSearchOptions
 	// Apply pagination
 	start := (opts.Page - 1) * opts.PageSize
 	if start >= totalCount {
-		return []*model.Notes{}, totalCount, nil
+		return []*model.Note{}, totalCount, nil
 	}
 
 	end := start + opts.PageSize
@@ -145,14 +145,14 @@ func (svc *NotesService) SearchNotes(ctx context.Context, opts NoteSearchOptions
 	return pagedNotes, totalCount, nil
 }
 
-func (svc *NotesService) CreateNote(ctx context.Context, note *model.Notes) error {
+func (svc *NoteService) CreateNote(ctx context.Context, note *model.Note) error {
 	// Validate note content (this also normalizes title, content, and tags)
 	if err := svc.validateNote(note); err != nil {
 		return err
 	}
 
 	// Check user's note limit
-	count, err := svc.NotesRepo.CountUserNotes(note.UserID)
+	count, err := svc.NoteRepo.CountUserNotes(note.UserID)
 	if err != nil {
 		return err
 	}
@@ -165,12 +165,12 @@ func (svc *NotesService) CreateNote(ctx context.Context, note *model.Notes) erro
 	note.CreatedAt = now
 	note.UpdatedAt = now
 
-	return svc.NotesRepo.CreateNote(note)
+	return svc.NoteRepo.CreateNote(note)
 }
 
-func (svc *NotesService) UpdateNote(ctx context.Context, noteID string, userID string, updates *model.Notes) error {
+func (svc *NoteService) UpdateNote(ctx context.Context, noteID string, userID string, updates *model.Note) error {
 	// Verify note ownership first
-	existing, err := svc.NotesRepo.GetNote(noteID, userID)
+	existing, err := svc.NoteRepo.GetNote(noteID, userID)
 	if err != nil {
 		return err
 	}
@@ -192,12 +192,12 @@ func (svc *NotesService) UpdateNote(ctx context.Context, noteID string, userID s
 	updates.PinnedPosition = existing.PinnedPosition
 
 	// Update the note through repository
-	return svc.NotesRepo.UpdateNote(noteID, userID, updates)
+	return svc.NoteRepo.UpdateNote(noteID, userID, updates)
 }
 
-func (svc *NotesService) ToggleFavorite(ctx context.Context, noteID string, userID string) error {
+func (svc *NoteService) ToggleFavorite(ctx context.Context, noteID string, userID string) error {
 	// Verify note ownership first
-	note, err := svc.NotesRepo.GetNote(noteID, userID)
+	note, err := svc.NoteRepo.GetNote(noteID, userID)
 	if err != nil {
 		return err
 	}
@@ -223,7 +223,7 @@ func (svc *NotesService) ToggleFavorite(ctx context.Context, noteID string, user
 	}
 
 	// Create updates
-	updates := &model.Notes{
+	updates := &model.Note{
 		Title:      note.Title,
 		Content:    note.Content,
 		Tags:       newTags,
@@ -231,16 +231,16 @@ func (svc *NotesService) ToggleFavorite(ctx context.Context, noteID string, user
 		IsArchived: note.IsArchived,
 	}
 
-	return svc.NotesRepo.UpdateNote(noteID, userID, updates)
+	return svc.NoteRepo.UpdateNote(noteID, userID, updates)
 }
 
-func (svc *NotesService) GetPinnedNotes(ctx context.Context, userID string) ([]*model.Notes, error) {
+func (svc *NoteService) GetPinnedNotes(ctx context.Context, userID string) ([]*model.Note, error) {
 	if userID == "" {
 		return nil, errors.New("user ID is required")
 	}
 
 	// Get pinned notes from repository
-	pinnedNotes, err := svc.NotesRepo.GetPinnedNotes(userID)
+	pinnedNotes, err := svc.NoteRepo.GetPinnedNotes(userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pinned notes: %w", err)
 	}
@@ -249,9 +249,9 @@ func (svc *NotesService) GetPinnedNotes(ctx context.Context, userID string) ([]*
 	return pinnedNotes, nil
 }
 
-func (svc *NotesService) ToggleNotePin(ctx context.Context, noteID string, userID string) error {
+func (svc *NoteService) ToggleNotePin(ctx context.Context, noteID string, userID string) error {
 	// Check if note exists and get its current state
-	note, err := svc.NotesRepo.GetNote(noteID, userID)
+	note, err := svc.NoteRepo.GetNote(noteID, userID)
 	if err != nil {
 		return err
 	}
@@ -270,15 +270,15 @@ func (svc *NotesService) ToggleNotePin(ctx context.Context, noteID string, userI
 		}
 	}
 
-	return svc.NotesRepo.TogglePin(noteID, userID)
+	return svc.NoteRepo.TogglePin(noteID, userID)
 }
 
-func (svc *NotesService) GetUserNotes(ctx context.Context, userID string, limit int) ([]*model.Notes, int, error) {
+func (svc *NoteService) GetUserNotes(ctx context.Context, userID string, limit int) ([]*model.Note, int, error) {
 	if userID == "" {
 		return nil, 0, errors.New("user ID is required")
 	}
 
-	notes, err := svc.NotesRepo.GetUserNotes(userID) // Changed from svc to s
+	notes, err := svc.NoteRepo.GetUserNotes(userID) // Changed from svc to s
 	if err != nil {
 		return nil, 0, err
 	}
@@ -287,9 +287,9 @@ func (svc *NotesService) GetUserNotes(ctx context.Context, userID string, limit 
 	return notes, totalCount, nil
 }
 
-func (svc *NotesService) DeleteNote(ctx context.Context, noteID, userID string) error {
+func (svc *NoteService) DeleteNote(ctx context.Context, noteID, userID string) error {
 	// First verify the note exists and belongs to user
-	note, err := svc.NotesRepo.GetNote(noteID, userID)
+	note, err := svc.NoteRepo.GetNote(noteID, userID)
 	if err != nil {
 		return err
 	}
@@ -302,12 +302,12 @@ func (svc *NotesService) DeleteNote(ctx context.Context, noteID, userID string) 
 		return errors.New("cannot delete pinned note - unpin first")
 	}
 
-	return svc.NotesRepo.DeleteNote(noteID, userID)
+	return svc.NoteRepo.DeleteNote(noteID, userID)
 }
 
-func (svc *NotesService) ArchiveNote(ctx context.Context, noteID, userID string) error {
+func (svc *NoteService) ArchiveNote(ctx context.Context, noteID, userID string) error {
 	// Verify note ownership first
-	note, err := svc.NotesRepo.GetNote(noteID, userID)
+	note, err := svc.NoteRepo.GetNote(noteID, userID)
 	if err != nil {
 		return err
 	}
@@ -320,15 +320,15 @@ func (svc *NotesService) ArchiveNote(ctx context.Context, noteID, userID string)
 		return errors.New("cannot archive pinned note - unpin first")
 	}
 
-	return svc.NotesRepo.ArchiveNote(noteID, userID)
+	return svc.NoteRepo.ArchiveNote(noteID, userID)
 }
 
-func (svc *NotesService) GetArchivedNotes(ctx context.Context, userID string, page, pageSize int) ([]*model.Notes, int, error) {
+func (svc *NoteService) GetArchivedNotes(ctx context.Context, userID string, page, pageSize int) ([]*model.Note, int, error) {
 	if userID == "" {
 		return nil, 0, errors.New("user ID is required")
 	}
 
-	notes, err := svc.NotesRepo.GetArchivedNotes(userID)
+	notes, err := svc.NoteRepo.GetArchivedNotes(userID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -349,9 +349,9 @@ func (svc *NotesService) GetArchivedNotes(ctx context.Context, userID string, pa
 	return pagedNotes, totalCount, nil
 }
 
-func (svc *NotesService) UpdatePinPosition(ctx context.Context, noteID, userID string, newPosition int) error {
+func (svc *NoteService) UpdatePinPosition(ctx context.Context, noteID, userID string, newPosition int) error {
 	// Verify note exists and is pinned
-	note, err := svc.NotesRepo.GetNote(noteID, userID)
+	note, err := svc.NoteRepo.GetNote(noteID, userID)
 	if err != nil {
 		return err
 	}
@@ -360,7 +360,7 @@ func (svc *NotesService) UpdatePinPosition(ctx context.Context, noteID, userID s
 	}
 
 	// Get total pinned notes to validate position
-	pinnedNotes, err := svc.NotesRepo.GetPinnedNotes(userID)
+	pinnedNotes, err := svc.NoteRepo.GetPinnedNotes(userID)
 	if err != nil {
 		return err
 	}
@@ -370,16 +370,16 @@ func (svc *NotesService) UpdatePinPosition(ctx context.Context, noteID, userID s
 		return errors.New("invalid position")
 	}
 
-	return svc.NotesRepo.UpdatePinPosition(noteID, userID, newPosition)
+	return svc.NoteRepo.UpdatePinPosition(noteID, userID, newPosition)
 }
 
-func (svc *NotesService) GetUserTags(ctx context.Context, userID string) (map[string]int, error) {
+func (svc *NoteService) GetUserTags(ctx context.Context, userID string) (map[string]int, error) {
 	if userID == "" {
 		return nil, errors.New("user ID is required")
 	}
 
 	// Get tag counts
-	tagCounts, err := svc.NotesRepo.CountNotesByTag(userID)
+	tagCounts, err := svc.NoteRepo.CountNotesByTag(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -387,14 +387,14 @@ func (svc *NotesService) GetUserTags(ctx context.Context, userID string) (map[st
 	return tagCounts, nil
 }
 
-func (svc *NotesService) GetAllUserTags(ctx context.Context, userID string) ([]string, error) {
+func (svc *NoteService) GetAllUserTags(ctx context.Context, userID string) ([]string, error) {
 	if userID == "" {
 		return nil, errors.New("user ID is required")
 	}
 
-	return svc.NotesRepo.GetAllTags(userID)
+	return svc.NoteRepo.GetAllTags(userID)
 }
-func (svc *NotesService) GetSearchSuggestions(userID string, prefix string) ([]string, error) {
+func (svc *NoteService) GetSearchSuggestions(userID string, prefix string) ([]string, error) {
 	if userID == "" {
 		return nil, errors.New("user ID is required")
 	}
@@ -405,7 +405,7 @@ func (svc *NotesService) GetSearchSuggestions(userID string, prefix string) ([]s
 	}
 
 	prefix = strings.ToLower(prefix)
-	suggestions, err := svc.NotesRepo.GetSearchSuggestions(userID, prefix)
+	suggestions, err := svc.NoteRepo.GetSearchSuggestions(userID, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -426,7 +426,7 @@ func (svc *NotesService) GetSearchSuggestions(userID string, prefix string) ([]s
 
 //helper
 
-func (svc *NotesService) isFavorited(note *model.Notes) bool {
+func (svc *NoteService) isFavorited(note *model.Note) bool {
 	for _, tag := range note.Tags {
 		if tag == "favorites" {
 			return true

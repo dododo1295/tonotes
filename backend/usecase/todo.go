@@ -12,16 +12,16 @@ import (
 	"github.com/google/uuid"
 )
 
-type TodosService struct {
-	repo *repository.TodosRepo
+type TodoService struct {
+	repo *repository.TodoRepo
 }
 
-func NewTodosService(repo *repository.TodosRepo) *TodosService {
-	return &TodosService{repo: repo}
+func NewTodoService(repo *repository.TodoRepo) *TodoService {
+	return &TodoService{repo: repo}
 }
 
 // Get the user's todos
-func (svc *TodosService) GetUserTodos(ctx context.Context, userID string) ([]*model.Todos, error) {
+func (svc *TodoService) GetUserTodos(ctx context.Context, userID string) ([]*model.Todo, error) {
 	todos, err := svc.repo.GetUserTodos(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -61,7 +61,7 @@ func (svc *TodosService) GetUserTodos(ctx context.Context, userID string) ([]*mo
 }
 
 // Create Todo
-func (svc *TodosService) CreateTodo(ctx context.Context, todo *model.Todos) error {
+func (svc *TodoService) CreateTodo(ctx context.Context, todo *model.Todo) error {
 	if todo.UserID == "" {
 		return errors.New("user ID is required")
 	}
@@ -123,7 +123,7 @@ func (svc *TodosService) CreateTodo(ctx context.Context, todo *model.Todos) erro
 }
 
 // Delete todos
-func (svc *TodosService) DeleteTodo(ctx context.Context, todoID string, userID string) error {
+func (svc *TodoService) DeleteTodo(ctx context.Context, todoID string, userID string) error {
 	// Verify todo exists and belongs to user
 	existing, err := svc.repo.GetTodosByID(userID, todoID)
 	if err != nil {
@@ -141,7 +141,7 @@ func (svc *TodosService) DeleteTodo(ctx context.Context, todoID string, userID s
 }
 
 // Get Todos Count
-func (svc *TodosService) CountUserTodos(ctx context.Context, userID string) (int, error) {
+func (svc *TodoService) CountUserTodos(ctx context.Context, userID string) (int, error) {
 	todos, err := svc.repo.GetUserTodos(ctx, userID)
 	if err != nil {
 		return 0, err
@@ -150,7 +150,7 @@ func (svc *TodosService) CountUserTodos(ctx context.Context, userID string) (int
 }
 
 // Search Todos
-func (svc *TodosService) SearchTodos(ctx context.Context, userID string, searchText string) ([]*model.Todos, error) {
+func (svc *TodoService) SearchTodos(ctx context.Context, userID string, searchText string) ([]*model.Todo, error) {
 	// Get all todos for the user
 	todos, err := svc.repo.GetUserTodos(ctx, userID)
 	if err != nil {
@@ -159,12 +159,12 @@ func (svc *TodosService) SearchTodos(ctx context.Context, userID string, searchT
 
 	// If search text is empty, return empty result
 	if searchText == "" {
-		return []*model.Todos{}, nil
+		return []*model.Todo{}, nil
 	}
 
 	// Convert search text to lowercase for case-insensitive search
 	searchText = strings.ToLower(searchText)
-	var results []*model.Todos
+	var results []*model.Todo
 
 	// Filter todos based on search text
 	for _, todo := range todos {
@@ -178,7 +178,7 @@ func (svc *TodosService) SearchTodos(ctx context.Context, userID string, searchT
 }
 
 // update Todos
-func (svc *TodosService) UpdateTodo(ctx context.Context, todoID string, userID string, updates *model.Todos) (*model.Todos, error) {
+func (svc *TodoService) UpdateTodo(ctx context.Context, todoID string, userID string, updates *model.Todo) (*model.Todo, error) {
 	// Check if todo exists
 	existing, err := svc.repo.GetTodosByID(userID, todoID)
 	if err != nil {
@@ -244,7 +244,7 @@ func (svc *TodosService) UpdateTodo(ctx context.Context, todoID string, userID s
 }
 
 // Update Due Date
-func (svc *TodosService) UpdateDueDate(ctx context.Context, todoID string, userID string, newDueDate time.Time) (*model.Todos, error) {
+func (svc *TodoService) UpdateDueDate(ctx context.Context, todoID string, userID string, newDueDate time.Time) (*model.Todo, error) {
 	existing, err := svc.repo.GetTodosByID(userID, todoID)
 	if err != nil {
 		return nil, err
@@ -272,7 +272,7 @@ func (svc *TodosService) UpdateDueDate(ctx context.Context, todoID string, userI
 }
 
 // Update Reminder
-func (svc *TodosService) UpdateReminder(ctx context.Context, todoID string, userID string, newReminder time.Time) (*model.Todos, error) {
+func (svc *TodoService) UpdateReminder(ctx context.Context, todoID string, userID string, newReminder time.Time) (*model.Todo, error) {
 	existing, err := svc.repo.GetTodosByID(userID, todoID)
 	if err != nil {
 		return nil, err
@@ -301,7 +301,7 @@ func (svc *TodosService) UpdateReminder(ctx context.Context, todoID string, user
 }
 
 // Update Priority
-func (svc *TodosService) UpdatePriority(ctx context.Context, todoID string, userID string, newPriority model.Priority) (*model.Todos, error) {
+func (svc *TodoService) UpdatePriority(ctx context.Context, todoID string, userID string, newPriority model.Priority) (*model.Todo, error) {
 	existing, err := svc.repo.GetTodosByID(userID, todoID)
 	if err != nil {
 		return nil, err
@@ -325,7 +325,7 @@ func (svc *TodosService) UpdatePriority(ctx context.Context, todoID string, user
 }
 
 // Update Recurrence
-func (svc *TodosService) UpdateToRecurring(ctx context.Context, todoID string, userID string, pattern model.RecurrencePattern, endDate time.Time) (*model.Todos, error) {
+func (svc *TodoService) UpdateToRecurring(ctx context.Context, todoID string, userID string, pattern model.RecurrencePattern, endDate time.Time) (*model.Todo, error) {
 	existing, err := svc.repo.GetTodosByID(userID, todoID)
 	if err != nil {
 		return nil, err
@@ -358,7 +358,7 @@ func (svc *TodosService) UpdateToRecurring(ctx context.Context, todoID string, u
 }
 
 // Get Todos by Priority
-func (svc *TodosService) GetTodosByPriority(ctx context.Context, userID string, priority model.Priority) ([]*model.Todos, error) {
+func (svc *TodoService) GetTodosByPriority(ctx context.Context, userID string, priority model.Priority) ([]*model.Todo, error) {
 	// Validate priority first
 	if err := validatePriority(priority); err != nil {
 		return nil, err
@@ -371,7 +371,7 @@ func (svc *TodosService) GetTodosByPriority(ctx context.Context, userID string, 
 	}
 
 	// Filter todos by priority
-	var filteredTodos []*model.Todos
+	var filteredTodos []*model.Todo
 	for _, todo := range todos {
 		if todo.Priority == priority {
 			filteredTodos = append(filteredTodos, todo)
@@ -382,7 +382,7 @@ func (svc *TodosService) GetTodosByPriority(ctx context.Context, userID string, 
 }
 
 // Get All Todos By Tag
-func (svc *TodosService) GetTodosByTags(ctx context.Context, userID string, tags []string) ([]*model.Todos, error) {
+func (svc *TodoService) GetTodosByTags(ctx context.Context, userID string, tags []string) ([]*model.Todo, error) {
 	// Validate tags first
 	validatedTags, err := svc.validateTags(tags)
 	if err != nil {
@@ -397,11 +397,11 @@ func (svc *TodosService) GetTodosByTags(ctx context.Context, userID string, tags
 
 	// If no tags provided, return empty result
 	if len(validatedTags) == 0 {
-		return []*model.Todos{}, nil
+		return []*model.Todo{}, nil
 	}
 
 	// Filter todos by tags
-	var filteredTodos []*model.Todos
+	var filteredTodos []*model.Todo
 	for _, todo := range todos {
 		if containsAnyTag(todo.Tags, validatedTags) {
 			filteredTodos = append(filteredTodos, todo)
@@ -412,7 +412,7 @@ func (svc *TodosService) GetTodosByTags(ctx context.Context, userID string, tags
 }
 
 // Get User Tags
-func (svc *TodosService) GetUserTags(ctx context.Context, userID string) ([]string, error) {
+func (svc *TodoService) GetUserTags(ctx context.Context, userID string) ([]string, error) {
 	todos, err := svc.repo.GetUserTodos(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -436,7 +436,7 @@ func (svc *TodosService) GetUserTags(ctx context.Context, userID string) ([]stri
 }
 
 // Get Upcoming Todos
-func (svc *TodosService) GetUpcomingTodos(ctx context.Context, userID string, days int) ([]*model.Todos, error) {
+func (svc *TodoService) GetUpcomingTodos(ctx context.Context, userID string, days int) ([]*model.Todo, error) {
 	if days <= 0 {
 		return nil, errors.New("days must be positive")
 	}
@@ -449,7 +449,7 @@ func (svc *TodosService) GetUpcomingTodos(ctx context.Context, userID string, da
 	now := time.Now()
 	deadline := now.AddDate(0, 0, days)
 
-	var upcomingTodos []*model.Todos
+	var upcomingTodos []*model.Todo
 	for _, todo := range todos {
 		if !todo.Complete && !todo.DueDate.IsZero() && todo.DueDate.After(now) && todo.DueDate.Before(deadline) {
 			upcomingTodos = append(upcomingTodos, todo)
@@ -460,7 +460,7 @@ func (svc *TodosService) GetUpcomingTodos(ctx context.Context, userID string, da
 }
 
 // Updat Tags in Todos
-func (svc *TodosService) UpdateTags(ctx context.Context, todoID string, userID string, newTags []string) (*model.Todos, error) {
+func (svc *TodoService) UpdateTags(ctx context.Context, todoID string, userID string, newTags []string) (*model.Todo, error) {
 	existing, err := svc.repo.GetTodosByID(userID, todoID)
 	if err != nil {
 		return nil, err
@@ -485,14 +485,14 @@ func (svc *TodosService) UpdateTags(ctx context.Context, todoID string, userID s
 }
 
 // Get Overdue Todos
-func (svc *TodosService) GetOverdueTodos(ctx context.Context, userID string) ([]*model.Todos, error) {
+func (svc *TodoService) GetOverdueTodos(ctx context.Context, userID string) ([]*model.Todo, error) {
 	todos, err := svc.repo.GetUserTodos(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
 	now := time.Now()
-	var overdueTodos []*model.Todos
+	var overdueTodos []*model.Todo
 	for _, todo := range todos {
 		if !todo.Complete && todo.DueDate.Before(now) {
 			overdueTodos = append(overdueTodos, todo)
@@ -503,14 +503,14 @@ func (svc *TodosService) GetOverdueTodos(ctx context.Context, userID string) ([]
 }
 
 // Get Todos With Reminders
-func (svc *TodosService) GetTodosWithReminders(ctx context.Context, userID string) ([]*model.Todos, error) {
+func (svc *TodoService) GetTodosWithReminders(ctx context.Context, userID string) ([]*model.Todo, error) {
 	todos, err := svc.repo.GetUserTodos(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
 	now := time.Now()
-	var todosWithReminders []*model.Todos
+	var todosWithReminders []*model.Todo
 	for _, todo := range todos {
 		if !todo.Complete && !todo.ReminderAt.IsZero() && todo.ReminderAt.After(now) {
 			todosWithReminders = append(todosWithReminders, todo)
@@ -521,7 +521,7 @@ func (svc *TodosService) GetTodosWithReminders(ctx context.Context, userID strin
 }
 
 // Toggle Todo Complete Status
-func (svc *TodosService) ToggleTodoComplete(ctx context.Context, todoID string, userID string) (*model.Todos, error) {
+func (svc *TodoService) ToggleTodoComplete(ctx context.Context, todoID string, userID string) (*model.Todo, error) {
 	// Get todo
 	existing, err := svc.repo.GetTodosByID(userID, todoID)
 	if err != nil {
@@ -544,13 +544,13 @@ func (svc *TodosService) ToggleTodoComplete(ctx context.Context, todoID string, 
 }
 
 // Get Completed Todos
-func (svc *TodosService) GetCompletedTodos(ctx context.Context, userID string) ([]*model.Todos, error) {
+func (svc *TodoService) GetCompletedTodos(ctx context.Context, userID string) ([]*model.Todo, error) {
 	todos, err := svc.repo.GetUserTodos(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	var completedTodos []*model.Todos
+	var completedTodos []*model.Todo
 	for _, todo := range todos {
 		if todo.Complete {
 			completedTodos = append(completedTodos, todo)
@@ -561,13 +561,13 @@ func (svc *TodosService) GetCompletedTodos(ctx context.Context, userID string) (
 }
 
 // Get Pending Todos
-func (svc *TodosService) GetPendingTodos(ctx context.Context, userID string) ([]*model.Todos, error) {
+func (svc *TodoService) GetPendingTodos(ctx context.Context, userID string) ([]*model.Todo, error) {
 	todos, err := svc.repo.GetUserTodos(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	var pendingTodos []*model.Todos
+	var pendingTodos []*model.Todo
 	for _, todo := range todos {
 		if !todo.Complete {
 			pendingTodos = append(pendingTodos, todo)
@@ -578,7 +578,7 @@ func (svc *TodosService) GetPendingTodos(ctx context.Context, userID string) ([]
 }
 
 // Todo Stats
-func (svc *TodosService) GetTodoStats(ctx context.Context, userID string) (*model.TodoStats, error) {
+func (svc *TodoService) GetTodoStats(ctx context.Context, userID string) (*model.TodoStats, error) {
 	todos, err := svc.repo.GetUserTodos(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -643,7 +643,7 @@ func validatePriority(p model.Priority) error {
 	}
 }
 
-func (svc *TodosService) validateTags(tags []string) ([]string, error) {
+func (svc *TodoService) validateTags(tags []string) ([]string, error) {
 	if tags == nil || len(tags) == 0 {
 		return nil, nil
 	}
