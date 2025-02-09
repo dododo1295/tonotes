@@ -25,7 +25,7 @@ type TodoResponse struct {
 	CreatedAt         time.Time               `json:"created_at"`
 	UpdatedAt         time.Time               `json:"updated_at"`
 	TimeUntilDue      string                  `json:"time_until_due,omitempty"` // New computed field
-	_links            map[string]TodoLink     `json:"_links,omitempty"`
+	Links             map[string]TodoLink     `json:"_links,omitempty"`
 }
 
 // Convert model.Todos to TodoResponse
@@ -41,7 +41,7 @@ func ToTodoResponse(todo *model.Todo, links map[string]TodoLink) TodoResponse {
 		RecurrencePattern: todo.RecurrencePattern,
 		CreatedAt:         todo.CreatedAt,
 		UpdatedAt:         todo.UpdatedAt,
-		_links:            links, // Set links
+		Links:             links, // Set links
 	}
 
 	// Handle nullable time fields

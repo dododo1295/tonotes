@@ -14,7 +14,7 @@ type UserProfileResponse struct {
 	Username  string              `json:"username"`
 	Email     string              `json:"email"`
 	CreatedAt time.Time           `json:"created_at"`
-	_links    map[string]UserLink `json:"_links,omitempty"` // HAL UserLinks
+	Links     map[string]UserLink `json:"_links,omitempty"` // HAL UserLinks
 }
 
 func ToUserProfileResponse(user *model.User, links map[string]UserLink) UserProfileResponse {
@@ -22,6 +22,6 @@ func ToUserProfileResponse(user *model.User, links map[string]UserLink) UserProf
 		Username:  user.Username,
 		Email:     user.Email,
 		CreatedAt: user.CreatedAt,
-		_links:    links, // Set links
+		Links:     links, // Set links
 	}
 }

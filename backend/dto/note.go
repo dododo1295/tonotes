@@ -20,7 +20,7 @@ type NoteResponse struct {
 	PinnedPosition *int                `json:"pinned_position,omitempty"`
 	CreatedAt      time.Time           `json:"created_at"`
 	UpdatedAt      time.Time           `json:"updated_at"`
-	_links         map[string]NoteLink `json:"_links,omitempty"`
+	Links          map[string]NoteLink `json:"_links,omitempty"`
 }
 
 type NotesPageResponse struct {
@@ -28,7 +28,7 @@ type NotesPageResponse struct {
 	TotalCount  int                 `json:"total_count"`
 	PageCount   int                 `json:"page_count"`
 	CurrentPage int                 `json:"current_page"`
-	_links      map[string]NoteLink `json:"_links,omitempty"` // HAL NoteLinks
+	Links       map[string]NoteLink `json:"_links,omitempty"`
 }
 
 // Convert a single note to NoteResponse
@@ -42,7 +42,7 @@ func ToNoteResponse(note *model.Note, links map[string]NoteLink) NoteResponse {
 		IsArchived: note.IsArchived,
 		CreatedAt:  note.CreatedAt,
 		UpdatedAt:  note.UpdatedAt,
-		_links:     links, // Set links
+		Links:      links, // Set links
 	}
 
 	if note.PinnedPosition != 0 {
@@ -69,6 +69,6 @@ func NewNotesPageResponse(notes []*model.Note, totalCount, pageCount, currentPag
 		TotalCount:  totalCount,
 		PageCount:   pageCount,
 		CurrentPage: currentPage,
-		_links:      links,
+		Links:       links,
 	}
 }
