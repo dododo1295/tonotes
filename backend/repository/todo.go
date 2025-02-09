@@ -12,19 +12,19 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-type TodosRepo struct {
+type TodoRepo struct {
 	MongoCollection *mongo.Collection
 }
 
-func GetTodosRepo(client *mongo.Client) *TodosRepo {
+func GetTodoRepo(client *mongo.Client) *TodoRepo {
 	dbName := os.Getenv("MONGO_DB")
-	collectionName := os.Getenv("TODOS_COLLECTION")
-	return &TodosRepo{
+	collectionName := os.Getenv("TODO_COLLECTION")
+	return &TodoRepo{
 		MongoCollection: client.Database(dbName).Collection(collectionName),
 	}
 }
 
-func (r *TodosRepo) CreateTodo(ctx context.Context, todo *model.Todos) error {
+func (r *TodoRepo) CreateTodo(ctx context.Context, todo *model.Todo) error {
 	timer := utils.TrackDBOperation("insert", "todos")
 	defer timer.ObserveDuration()
 
@@ -42,11 +42,11 @@ func (r *TodosRepo) CreateTodo(ctx context.Context, todo *model.Todos) error {
 	return nil
 }
 
-func (r *TodosRepo) GetUserTodos(ctx context.Context, userID string) ([]*model.Todos, error) {
+func (r *TodoRepo) GetUserTodos(ctx context.Context, userID string) ([]*model.Todo, error) {
 	timer := utils.TrackDBOperation("find", "todos")
 	defer timer.ObserveDuration()
 
-	var todos []*model.Todos
+	var todos []*model.Todo
 	cursor, err := r.MongoCollection.Find(ctx, bson.M{"user_id": userID})
 	if err != nil {
 		utils.TrackError("database", "todo_fetch_failed")
@@ -61,8 +61,8 @@ func (r *TodosRepo) GetUserTodos(ctx context.Context, userID string) ([]*model.T
 	return todos, nil
 }
 
-func (r *TodosRepo) GetTodosByID(userID string, todoID string) (*model.Todos, error) {
-	var todo model.Todos
+func (r *TodoRepo) GetTodosByID(userID string, todoID string) (*model.Todo, error) {
+	var todo model.Todo
 	err := r.MongoCollection.FindOne(context.Background(),
 		bson.M{"_id": todoID, "user_id": userID}).Decode(&todo)
 	if err != nil {
@@ -74,7 +74,7 @@ func (r *TodosRepo) GetTodosByID(userID string, todoID string) (*model.Todos, er
 	return &todo, nil
 }
 
-func (r *TodosRepo) UpdateTodo(ctx context.Context, todoID string, userID string, updates *model.Todos) error {
+func (r *TodoRepo) UpdateTodo(ctx context.Context, todoID string, userID string, updates *model.Todo) error {
 	timer := utils.TrackDBOperation("update", "todos")
 	defer timer.ObserveDuration()
 
@@ -110,7 +110,7 @@ func (r *TodosRepo) UpdateTodo(ctx context.Context, todoID string, userID string
 	return nil
 }
 
-func (r *TodosRepo) DeleteTodo(ctx context.Context, todoID string, userID string) error {
+func (r *TodoRepo) DeleteTodo(ctx context.Context, todoID string, userID string) error {
 	timer := utils.TrackDBOperation("delete", "todos")
 	defer timer.ObserveDuration()
 
@@ -133,7 +133,7 @@ func (r *TodosRepo) DeleteTodo(ctx context.Context, todoID string, userID string
 	return nil
 }
 
-func (r *TodosRepo) CountAllTodos(ctx context.Context, userID string) (int, error) {
+func (r *TodoRepo) CountAllTodos(ctx context.Context, userID string) (int, error) {
 	timer := utils.TrackDBOperation("count", "todos")
 	defer timer.ObserveDuration()
 

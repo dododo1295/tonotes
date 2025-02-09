@@ -18,7 +18,7 @@ import (
 
 func GetUserRepo(client *mongo.Client) *UserRepo {
 	dbName := os.Getenv("MONGO_DB")
-	collectionName := os.Getenv("USERS_COLLECTION")
+	collectionName := os.Getenv("USER_COLLECTION")
 	return &UserRepo{
 		MongoCollection: client.Database(dbName).Collection(collectionName),
 	}
@@ -69,45 +69,45 @@ func (r *UserRepo) FindUserByUsername(username string) (*model.User, error) {
 }
 
 func (r *UserRepo) FindUser(userID string) (*model.User, error) {
-    timer := utils.TrackDBOperation("find", "users")
-    defer timer.ObserveDuration()
+	timer := utils.TrackDBOperation("find", "users")
+	defer timer.ObserveDuration()
 
-    var user model.User
-    filter := bson.D{{Key: "user_id", Value: userID}}
+	var user model.User
+	filter := bson.D{{Key: "user_id", Value: userID}}
 
-    // Add logging for debugging
-    log.Printf("Finding user with ID: %s", userID)
+	// Add logging for debugging
+	log.Printf("Finding user with ID: %s", userID)
 
-    // Explicitly set all fields in projection
-    opts := options.FindOne().SetProjection(bson.M{
-        "user_id": 1,
-        "username": 1,
-        "email": 1,
-        "password": 1,
-        "createdAt": 1,
-        "lastEmailChange": 1,
-        "lastPasswordChange": 1,
-        "is_active": 1,
-        "two_factor_secret": 1,
-        "two_factor_enabled": 1,
-        "recovery_codes": 1,
-    })
+	// Explicitly set all fields in projection
+	opts := options.FindOne().SetProjection(bson.M{
+		"user_id":            1,
+		"username":           1,
+		"email":              1,
+		"password":           1,
+		"createdAt":          1,
+		"lastEmailChange":    1,
+		"lastPasswordChange": 1,
+		"is_active":          1,
+		"two_factor_secret":  1,
+		"two_factor_enabled": 1,
+		"recovery_codes":     1,
+	})
 
-    err := r.MongoCollection.FindOne(context.Background(), filter, opts).Decode(&user)
-    if err != nil {
-        if err == mongo.ErrNoDocuments {
-            utils.TrackError("database", "user_not_found")
-            return nil, nil
-        }
-        utils.TrackError("database", "user_lookup_error")
-        return nil, err
-    }
+	err := r.MongoCollection.FindOne(context.Background(), filter, opts).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			utils.TrackError("database", "user_not_found")
+			return nil, nil
+		}
+		utils.TrackError("database", "user_lookup_error")
+		return nil, err
+	}
 
-    // Add logging for debugging
-    log.Printf("Found user: %+v", user)
-    log.Printf("Recovery codes: %v", user.RecoveryCodes)
+	// Add logging for debugging
+	log.Printf("Found user: %+v", user)
+	log.Printf("Recovery codes: %v", user.RecoveryCodes)
 
-    return &user, nil
+	return &user, nil
 }
 
 func (r *UserRepo) UpdateUserPassword(userID string, hashedPassword string) (int64, error) {

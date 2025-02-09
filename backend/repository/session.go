@@ -22,7 +22,7 @@ type SessionRepo struct {
 
 func GetSessionRepo(client *mongo.Client) *SessionRepo {
 	dbName := os.Getenv("MONGO_DB")
-	collectionName := os.Getenv("SESSIONS_COLLECTION")
+	collectionName := os.Getenv("SESSION_COLLECTION")
 	return &SessionRepo{
 		MongoCollection: client.Database(dbName).Collection(collectionName),
 	}

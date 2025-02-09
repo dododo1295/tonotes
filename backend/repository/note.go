@@ -17,7 +17,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-type NotesRepo struct {
+type NoteRepo struct {
 	MongoCollection *mongo.Collection
 }
 
@@ -33,20 +33,20 @@ type SearchOptions struct {
 	SearchScore bool
 }
 
-func GetNotesRepo(client *mongo.Client) *NotesRepo {
+func GetNoteRepo(client *mongo.Client) *NoteRepo {
 	dbName := os.Getenv("MONGO_DB")
-	collectionName := os.Getenv("NOTES_COLLECTION")
+	collectionName := os.Getenv("NOTE_COLLECTION")
 
 	if os.Getenv("GO_ENV") == "test" {
 		dbName = "tonotes_test"
 	}
-	return &NotesRepo{
+	return &NoteRepo{
 		MongoCollection: client.Database(dbName).Collection(collectionName),
 	}
 }
 
 // CountUserNotes counts the number of notes for a user
-func (r *NotesRepo) CountUserNotes(userID string) (int, error) {
+func (r *NoteRepo) CountUserNotes(userID string) (int, error) {
 	count, err := r.MongoCollection.CountDocuments(context.Background(),
 		bson.M{"user_id": userID})
 	if err != nil {
@@ -56,7 +56,7 @@ func (r *NotesRepo) CountUserNotes(userID string) (int, error) {
 }
 
 // GetAllTags retrieves all unique tags used by a user
-func (r *NotesRepo) GetAllTags(userID string) ([]string, error) {
+func (r *NoteRepo) GetAllTags(userID string) ([]string, error) {
 	// Using MongoDB's distinct command to get unique tags
 	tags, err := r.MongoCollection.Distinct(
 		context.Background(),
@@ -79,7 +79,7 @@ func (r *NotesRepo) GetAllTags(userID string) ([]string, error) {
 }
 
 // CountNotesByTag counts notes for each tag
-func (r *NotesRepo) CountNotesByTag(userID string) (map[string]int, error) {
+func (r *NoteRepo) CountNotesByTag(userID string) (map[string]int, error) {
 	pipeline := []bson.M{
 		{
 			"$match": bson.M{
@@ -123,7 +123,7 @@ func (r *NotesRepo) CountNotesByTag(userID string) (map[string]int, error) {
 }
 
 // CreateNote creates a new note
-func (r *NotesRepo) CreateNote(note *model.Notes) error {
+func (r *NoteRepo) CreateNote(note *model.Note) error {
 	timer := utils.TrackDBOperation("insert", "notes")
 	defer timer.ObserveDuration()
 
@@ -146,8 +146,8 @@ func (r *NotesRepo) CreateNote(note *model.Notes) error {
 }
 
 // GetUserNotes retrieves all notes for a user
-func (r *NotesRepo) GetUserNotes(userID string) ([]*model.Notes, error) {
-	var notes []*model.Notes
+func (r *NoteRepo) GetUserNotes(userID string) ([]*model.Note, error) {
+	var notes []*model.Note
 	opts := options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}})
 
 	cursor, err := r.MongoCollection.Find(context.Background(),
@@ -164,8 +164,8 @@ func (r *NotesRepo) GetUserNotes(userID string) ([]*model.Notes, error) {
 }
 
 // GetNote retrieves a specific note
-func (r *NotesRepo) GetNote(noteID string, userID string) (*model.Notes, error) {
-	var note model.Notes
+func (r *NoteRepo) GetNote(noteID string, userID string) (*model.Note, error) {
+	var note model.Note
 	err := r.MongoCollection.FindOne(context.Background(),
 		bson.M{"_id": noteID, "user_id": userID}).Decode(&note)
 	if err != nil {
@@ -178,7 +178,7 @@ func (r *NotesRepo) GetNote(noteID string, userID string) (*model.Notes, error) 
 }
 
 // UpdateNote updates a specific note
-func (r *NotesRepo) UpdateNote(noteID string, userID string, updates *model.Notes) error {
+func (r *NoteRepo) UpdateNote(noteID string, userID string, updates *model.Note) error {
 	timer := utils.TrackDBOperation("update", "notes")
 	defer timer.ObserveDuration()
 
@@ -213,7 +213,7 @@ func (r *NotesRepo) UpdateNote(noteID string, userID string, updates *model.Note
 }
 
 // DeleteNote deletes a specific note
-func (r *NotesRepo) DeleteNote(noteID string, userID string) error {
+func (r *NoteRepo) DeleteNote(noteID string, userID string) error {
 	timer := utils.TrackDBOperation("delete", "notes")
 	defer timer.ObserveDuration()
 
@@ -237,11 +237,11 @@ func (r *NotesRepo) DeleteNote(noteID string, userID string) error {
 }
 
 // ArchiveNote toggles the archived status of a note
-func (r *NotesRepo) ArchiveNote(noteID string, userID string) error {
+func (r *NoteRepo) ArchiveNote(noteID string, userID string) error {
 	timer := utils.TrackDBOperation("update", "notes")
 	defer timer.ObserveDuration()
 
-	var note model.Notes
+	var note model.Note
 	filter := bson.M{
 		"_id":     noteID,
 		"user_id": userID,
@@ -275,8 +275,8 @@ func (r *NotesRepo) ArchiveNote(noteID string, userID string) error {
 }
 
 // GetArchivedNotes retrieves all archived notes for a user
-func (r *NotesRepo) GetArchivedNotes(userID string) ([]*model.Notes, error) {
-	var notes []*model.Notes
+func (r *NoteRepo) GetArchivedNotes(userID string) ([]*model.Note, error) {
+	var notes []*model.Note
 	opts := options.Find().SetSort(bson.D{{Key: "updated_at", Value: -1}})
 
 	cursor, err := r.MongoCollection.Find(context.Background(),
@@ -293,7 +293,7 @@ func (r *NotesRepo) GetArchivedNotes(userID string) ([]*model.Notes, error) {
 }
 
 // Pin-related operations
-func (r *NotesRepo) pinNote(ctx context.Context, noteID string, userID string) error {
+func (r *NoteRepo) pinNote(ctx context.Context, noteID string, userID string) error {
 	// Get current count of pinned notes
 	count, err := r.MongoCollection.CountDocuments(ctx, bson.M{
 		"user_id":   userID,
@@ -324,9 +324,9 @@ func (r *NotesRepo) pinNote(ctx context.Context, noteID string, userID string) e
 	return nil
 }
 
-func (r *NotesRepo) unpinNote(ctx context.Context, noteID string, userID string) error {
+func (r *NoteRepo) unpinNote(ctx context.Context, noteID string, userID string) error {
 	// Get the current note to find its position
-	var note model.Notes
+	var note model.Note
 	err := r.MongoCollection.FindOne(ctx,
 		bson.M{"_id": noteID, "user_id": userID}).Decode(&note)
 	if err != nil {
@@ -361,7 +361,7 @@ func (r *NotesRepo) unpinNote(ctx context.Context, noteID string, userID string)
 }
 
 // TogglePin now handles pinning and unpinning with positions
-func (r *NotesRepo) TogglePin(noteID string, userID string) error {
+func (r *NoteRepo) TogglePin(noteID string, userID string) error {
 	session, err := r.MongoCollection.Database().Client().StartSession()
 	if err != nil {
 		return err
@@ -369,7 +369,7 @@ func (r *NotesRepo) TogglePin(noteID string, userID string) error {
 	defer session.EndSession(context.Background())
 
 	return mongo.WithSession(context.Background(), session, func(sc mongo.SessionContext) error {
-		var note model.Notes
+		var note model.Note
 		filter := bson.M{
 			"_id":     noteID,
 			"user_id": userID,
@@ -389,7 +389,7 @@ func (r *NotesRepo) TogglePin(noteID string, userID string) error {
 }
 
 // UpdatePinPosition updates the position of a pinned note
-func (r *NotesRepo) UpdatePinPosition(noteID string, userID string, newPosition int) error {
+func (r *NoteRepo) UpdatePinPosition(noteID string, userID string, newPosition int) error {
 	// Get total pinned notes first to validate position
 	pinnedNotes, err := r.GetPinnedNotes(userID)
 	if err != nil {
@@ -408,7 +408,7 @@ func (r *NotesRepo) UpdatePinPosition(noteID string, userID string, newPosition 
 	defer session.EndSession(context.Background())
 
 	return mongo.WithSession(context.Background(), session, func(sc mongo.SessionContext) error {
-		var note model.Notes
+		var note model.Note
 		err := r.MongoCollection.FindOne(sc,
 			bson.M{"_id": noteID, "user_id": userID}).Decode(&note)
 		if err != nil {
@@ -469,8 +469,8 @@ func (r *NotesRepo) UpdatePinPosition(noteID string, userID string, newPosition 
 }
 
 // GetPinnedNotes retrieves all pinned notes for a user
-func (r *NotesRepo) GetPinnedNotes(userID string) ([]*model.Notes, error) {
-	var notes []*model.Notes
+func (r *NoteRepo) GetPinnedNotes(userID string) ([]*model.Note, error) {
+	var notes []*model.Note
 	opts := options.Find().SetSort(bson.D{{Key: "pinned_position", Value: 1}})
 
 	cursor, err := r.MongoCollection.Find(context.Background(),
@@ -490,7 +490,7 @@ func (r *NotesRepo) GetPinnedNotes(userID string) ([]*model.Notes, error) {
 	return notes, nil
 }
 
-func (r *NotesRepo) GetSearchSuggestions(userID, prefix string) ([]string, error) {
+func (r *NoteRepo) GetSearchSuggestions(userID, prefix string) ([]string, error) {
 	if strings.TrimSpace(prefix) == "" {
 		return []string{}, nil
 	}
@@ -560,7 +560,7 @@ func (r *NotesRepo) GetSearchSuggestions(userID, prefix string) ([]string, error
 	return suggestions, nil
 }
 
-func (r *NotesRepo) FindNotes(ctx context.Context, opts SearchOptions) ([]*model.Notes, error) {
+func (r *NoteRepo) FindNotes(ctx context.Context, opts SearchOptions) ([]*model.Note, error) {
 	filter := bson.M{"user_id": opts.UserID}
 
 	// Add text search if query provided
@@ -612,7 +612,7 @@ func (r *NotesRepo) FindNotes(ctx context.Context, opts SearchOptions) ([]*model
 	}
 	defer cursor.Close(ctx)
 
-	var notes []*model.Notes
+	var notes []*model.Note
 	if err := cursor.All(ctx, &notes); err != nil {
 		return nil, fmt.Errorf("failed to decode notes: %w", err)
 	}
@@ -622,7 +622,7 @@ func (r *NotesRepo) FindNotes(ctx context.Context, opts SearchOptions) ([]*model
 
 // helper functions
 
-func countMatches(note *model.Notes, query string) int {
+func countMatches(note *model.Note, query string) int {
 	query = strings.ToLower(query)
 	terms := strings.Fields(query)
 	matches := 0
