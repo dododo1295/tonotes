@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -180,31 +181,14 @@ func SetupIndexes(db *mongo.Database) error {
 	log.Printf("Collections in %s: %v", dbName, colls)
 
 	// Get collection references
-	notesCollection := db.Collection("notes")
-	todosCollection := db.Collection("todos")
-	usersCollection := db.Collection("users")
-	sessionsCollection := db.Collection("sessions")
+	notesCollection := os.Getenv("NOTE_COLLECTION")
+	todosCollection := os.Getenv("TODO_COLLECTION")
+	usersCollection := os.Getenv("USER_COLLECTION")
+	sessionsCollection := os.Getenv("SESSION_COLLECTION")
 
 	// Create indexes with error handling
-	if notesCollection != nil {
-		if _, err := notesCollection.Indexes().CreateMany(ctx, noteIndexes); err != nil {
-			return fmt.Errorf("failed to create notes indexes in %s: %w", dbName, err)
-		}
-	}
-	if todosCollection != nil {
-		if _, err := todosCollection.Indexes().CreateMany(ctx, todosIndexes); err != nil { // Changed from notesCollection
-			return fmt.Errorf("failed to create todos indexes in %s: %w", dbName, err)
-		}
-	}
-	if usersCollection != nil {
-		if _, err := usersCollection.Indexes().CreateMany(ctx, usersIndexes); err != nil { // Changed from notesCollection
-			return fmt.Errorf("failed to create users indexes in %s: %w", dbName, err)
-		}
-	}
-	if sessionsCollection != nil {
-		if _, err := sessionsCollection.Indexes().CreateMany(ctx, sessionsIndexes); err != nil { // Changed from notesCollection
-			return fmt.Errorf("failed to create sessions indexes in %s: %w", dbName, err)
-		}
+	if notesCollection == "" || todosCollection == "" || usersCollection == "" || sessionsCollection == "" {
+		return fmt.Errorf("env file isn't being read & collections are not initialized")
 	}
 
 	log.Printf("Successfully created all indexes in database: %s", dbName)
