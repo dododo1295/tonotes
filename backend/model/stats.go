@@ -20,3 +20,21 @@ type UserStats struct {
 		TotalSessions  int       `json:"total_sessions"`
 	} `json:"activity_stats"`
 }
+
+type TodoStats struct {
+	// Basic counts
+	Total     int `json:"total"`
+	Completed int `json:"completed"`
+	Pending   int `json:"pending"`
+
+	// Priority based counts
+	HighPriority   int `json:"high_priority"`
+	MediumPriority int `json:"medium_priority"`
+	LowPriority    int `json:"low_priority"`
+
+	// Time based counts
+	Overdue       int `json:"overdue"`
+	DueToday      int `json:"due_today"`
+	Upcoming      int `json:"upcoming"` // Due in next 7 days
+	WithReminders int `json:"with_reminders"`
+}
