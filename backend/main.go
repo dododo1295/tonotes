@@ -173,12 +173,12 @@ func setupRouter() *gin.Engine {
 	)
 	// initialize repository
 	sessionRepo := repository.GetSessionRepo(utils.MongoClient)
-	noteRepo := repository.GetNotesRepo(utils.MongoClient)
+	noteRepo := repository.GetNoteRepo(utils.MongoClient)
 	userRepo := repository.GetUserRepo(utils.MongoClient)
-	todoService := usecase.NewTodosService(repository.GetTodosRepo(utils.MongoClient))
+	todoService := usecase.NewTodoService(repository.GetTodoRepo(utils.MongoClient))
 
 	// initialize services
-	noteService := &usecase.NotesService{NotesRepo: noteRepo}
+	noteService := &usecase.NoteService{NoteRepo: noteRepo}
 
 	// Initialize stats handler
 	statsHandler := handler.NewStatsHandler(
@@ -223,13 +223,13 @@ func setupRouter() *gin.Engine {
 func setupRoutes(
 	router *gin.Engine,
 	sessionRepo *repository.SessionRepo,
-	notesService *usecase.NotesService,
+	noteService *usecase.NoteService,
 	statsHandler *handler.StatsHandler,
-	todosService *usecase.TodosService,
+	todoService *usecase.TodoService,
 ) {
 	// Initialize handlers
-	noteHandler := handler.NewNotesHandler(notesService)
-	todoHandler := handler.NewTodosHandler(todosService)
+	noteHandler := handler.NewNoteHandler(noteService)
+	todoHandler := handler.NewTodoHandler(todoService)
 
 	// API versioning
 	v1 := router.Group("/api/v1")
