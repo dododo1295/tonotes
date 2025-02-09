@@ -3,12 +3,14 @@ package handler
 import (
 	"fmt"
 	"log"
+	"main/dto"
 	"main/middleware"
 	"main/model"
 	"main/repository"
 	"main/services"
 	"main/usecase"
 	"main/utils"
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -144,16 +146,24 @@ func LoginHandler(c *gin.Context, sessionRepo *repository.SessionRepo) {
 	utils.TrackAuthAttempt("success", "login")
 	utils.TrackUserActivity(user.UserID)
 
-	// Prepare response
+	baseURL := utils.GetBaseURL(c)
+
+	// Generate Links: The most basic links.
+	links := map[string]dto.UserLink{
+        "self":    {Href: baseURL + "/user", Method: http.MethodGet},
+        "update-email": {Href: baseURL + "/user/email", Method: http.MethodPut}, // URL to update the email
+        "update-password": {Href: baseURL + "/user/password", Method: http.MethodPut}, // URL to update the password
+	}
+
+	userProfileResponse := dto.ToUserProfileResponse(user, links)
+
+	// Prepare response with DTO and links
+
 	response := gin.H{
 		"message": "Login successful",
 		"token":   token,
 		"refresh": refreshToken,
-		"user": gin.H{
-			"id":       user.UserID,
-			"username": user.Username,
-			"email":    user.Email,
-		},
+		"user":    userProfileResponse,
 	}
 
 	if notice != "" {

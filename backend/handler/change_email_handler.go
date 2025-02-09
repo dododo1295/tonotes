@@ -2,8 +2,10 @@ package handler
 
 import (
 	"log"
+	"main/dto"
 	"main/repository"
 	"main/utils"
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -61,8 +63,24 @@ func ChangeEmailHandler(c *gin.Context) {
 	}
 
 	log.Printf("Email changed successfully for user %s", userID)
-	utils.Success(c, gin.H{
-		"message": "Email updated successfully",
-		"email":   req.NewEmail, // Add this line to include the new email
-	})
+	//Retrieve base URL
+	baseURL := utils.GetBaseURL(c)
+
+	//Generate Link
+	links := map[string]dto.UserLink{
+		"self":            {Href: baseURL + "/user", Method: http.MethodGet},
+		"update-password": {Href: baseURL + "/user/password", Method: http.MethodPut},
+		"delete":          {Href: baseURL + "/user", Method: http.MethodDelete},
+	}
+
+	updatedUser, err := userRepo.FindUser(userID.(string))
+	if err != nil {
+		log.Printf("Error fetching updated user %s: %v", userID, err)
+		utils.InternalError(c, "Failed to fetch updated user details")
+		return
+	}
+
+	userProfileResponse := dto.ToUserProfileResponse(updatedUser, links)
+
+	utils.Success(c, userProfileResponse)
 }

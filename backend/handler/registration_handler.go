@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"main/dto"
 	"main/model"
 	"main/repository"
 	"main/utils"
+	"net/http"
 	"time"
 
 	"main/services"
@@ -20,7 +22,7 @@ func RegistrationHandler(c *gin.Context) {
 	defer func() {
 		duration := time.Since(start).Seconds()
 		utils.HTTPRequestDuration.WithLabelValues("POST", "/register").Observe(duration)
-		utils.RequestDistribution.WithLabelValues("/register", fmt.Sprintf("%d", c.Writer.Status())).Observe(duration)
+		utils.RequestDistribution.WithLabelValues("POST", "/register", fmt.Sprintf("%d", c.Writer.Status())).Observe(duration)
 	}()
 
 	var user model.User
@@ -71,13 +73,20 @@ func RegistrationHandler(c *gin.Context) {
 	}
 	utils.TokenUsage.WithLabelValues("refresh", "generated").Inc()
 
-	// Track successful registration
+	baseURL := utils.GetBaseURL(c)
+
+	// Create the links map
+	links := map[string]dto.UserLink{
+		"self": {Href: baseURL + "/user", Method: http.MethodGet}, // Corrected path
+	}
+
+	userProfileResponse := dto.ToUserProfileResponse(&user, links)
 	utils.TrackRegistration()
 	utils.UserGrowthRate.Inc()
 	utils.TrackUserActivity(user.UserID)
-
 	utils.Created(c, gin.H{
 		"message": "user registered successfully",
+		"profile": userProfileResponse, // Now returning the DTO with links
 		"token":   token,
 		"refresh": refreshToken,
 	})
