@@ -23,7 +23,7 @@ import (
 )
 
 // Setup function for stats testing
-func setupStatsHandler(t *testing.T) (*repository.UserRepo, *repository.NotesRepo, *usecase.TodosService, *repository.SessionRepo, func()) {
+func setupStatsHandler(t *testing.T) (*repository.UserRepo, *repository.NoteRepo, *usecase.TodoService, *repository.SessionRepo, func()) {
 	testutils.SetupTestEnvironment()
 	client, cleanup := testutils.SetupTestDB(t)
 
@@ -58,12 +58,12 @@ func setupStatsHandler(t *testing.T) (*repository.UserRepo, *repository.NotesRep
 	userRepo := repository.GetUserRepo(client)
 	userRepo.MongoCollection = db.Collection("users")
 
-	notesRepo := repository.GetNotesRepo(client)
-	notesRepo.MongoCollection = db.Collection("notes")
+	noteRepo := repository.GetNoteRepo(client)
+	noteRepo.MongoCollection = db.Collection("notes")
 
-	todosRepo := repository.GetTodosRepo(client)
+	todosRepo := repository.GetTodoRepo(client)
 	todosRepo.MongoCollection = db.Collection("todos")
-	todosService := usecase.NewTodosService(todosRepo)
+	todoService := usecase.NewTodoService(todosRepo)
 
 	sessionRepo := repository.GetSessionRepo(client)
 	sessionRepo.MongoCollection = db.Collection("sessions")
@@ -87,7 +87,7 @@ func setupStatsHandler(t *testing.T) (*repository.UserRepo, *repository.NotesRep
 		t.Logf("Collection %s initialized with %d documents", collName, count)
 	}
 
-	return userRepo, notesRepo, todosService, sessionRepo, func() {
+	return userRepo, noteRepo, todoService, sessionRepo, func() {
 		t.Log("Running cleanup...")
 		// Drop all collections
 		for _, collName := range collections {
@@ -100,11 +100,11 @@ func setupStatsHandler(t *testing.T) (*repository.UserRepo, *repository.NotesRep
 }
 
 func TestGetUserStatsHandler(t *testing.T) {
-	userRepo, notesRepo, todosService, sessionRepo, cleanup := setupStatsHandler(t)
+	userRepo, noteRepo, todoService, sessionRepo, cleanup := setupStatsHandler(t)
 	defer cleanup()
 
 	// Create stats handler
-	statsHandler := handler.NewStatsHandler(userRepo, notesRepo, todosService, sessionRepo)
+	statsHandler := handler.NewStatsHandler(userRepo, noteRepo, todoService, sessionRepo)
 
 	tests := []struct {
 		name          string
@@ -132,7 +132,7 @@ func TestGetUserStatsHandler(t *testing.T) {
 				}
 
 				// Create notes
-				notes := []*model.Notes{
+				notes := []*model.Note{
 					{
 						ID:        uuid.New().String(),
 						UserID:    userID,
@@ -156,13 +156,13 @@ func TestGetUserStatsHandler(t *testing.T) {
 				}
 
 				for _, note := range notes {
-					if err := notesRepo.CreateNote(note); err != nil {
+					if err := noteRepo.CreateNote(note); err != nil {
 						t.Fatalf("Failed to create note: %v", err)
 					}
 				}
 
 				// Create todos
-				todos := []*model.Todos{
+				todos := []*model.Todo{
 					{
 						TodoID:      uuid.New().String(),
 						UserID:      userID,
@@ -188,7 +188,7 @@ func TestGetUserStatsHandler(t *testing.T) {
 				}
 
 				for _, todo := range todos {
-					if err := todosService.CreateTodo(ctx, todo); err != nil {
+					if err := todoService.CreateTodo(ctx, todo); err != nil {
 						t.Fatalf("Failed to create todo: %v", err)
 					}
 				}

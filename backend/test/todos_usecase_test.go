@@ -18,7 +18,7 @@ func init() {
 	testutils.SetupTestEnvironment()
 }
 
-func setupTodosUsecaseTest(t *testing.T) (*repository.TodosRepo, *usecase.TodosService, func()) {
+func setupTodosUsecaseTest(t *testing.T) (*repository.TodoRepo, *usecase.TodoService, func()) {
 	// Setup test database
 	client, cleanup := testutils.SetupTestDB(t)
 
@@ -32,10 +32,10 @@ func setupTodosUsecaseTest(t *testing.T) (*repository.TodosRepo, *usecase.TodosS
 	}
 
 	// Initialize repository and service
-	todosRepo := &repository.TodosRepo{
+	todosRepo := &repository.TodoRepo{
 		MongoCollection: db.Collection("todos"),
 	}
-	todosService := usecase.NewTodosService(todosRepo)
+	todosService := usecase.NewTodoService(todosRepo)
 
 	return todosRepo, todosService, func() {
 		if err := db.Collection("todos").Drop(context.Background()); err != nil {
@@ -62,7 +62,7 @@ func TestTodosService(t *testing.T) {
 				ctx := context.Background()
 
 				// Create test todos
-				todos := []*model.Todos{
+				todos := []*model.Todo{
 					{
 						TodoID:      uuid.New().String(),
 						UserID:      userID,
@@ -115,7 +115,7 @@ func TestTodosService(t *testing.T) {
 				ctx := context.Background()
 
 				// Create todos with different priorities
-				todos := []*model.Todos{
+				todos := []*model.Todo{
 					{
 						TodoID:    uuid.New().String(),
 						UserID:    userID,
@@ -170,7 +170,7 @@ func TestTodosService(t *testing.T) {
 				ctx := context.Background()
 
 				// Create todos with different tags
-				todos := []*model.Todos{
+				todos := []*model.Todo{
 					{
 						TodoID:    uuid.New().String(),
 						UserID:    userID,
@@ -217,7 +217,7 @@ func TestTodosService(t *testing.T) {
 				ctx := context.Background()
 
 				// Create todos with different due dates
-				todos := []*model.Todos{
+				todos := []*model.Todo{
 					{
 						TodoID:    uuid.New().String(),
 						UserID:    userID,

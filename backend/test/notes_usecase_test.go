@@ -63,7 +63,7 @@ func init() {
 	}
 }
 
-func setupNotesUsecaseTest(t *testing.T) (*mongo.Client, *usecase.NotesService, func()) {
+func setupNotesUsecaseTest(t *testing.T) (*mongo.Client, *usecase.NoteService, func()) {
 	// Verify environment setup
 	testutils.VerifyTestEnvironment(t)
 
@@ -109,11 +109,11 @@ func setupNotesUsecaseTest(t *testing.T) (*mongo.Client, *usecase.NotesService, 
 	}
 
 	// Initialize repository with correct database reference
-	notesRepo := repository.GetNotesRepo(client)
+	notesRepo := repository.GetNoteRepo(client)
 	notesRepo.MongoCollection = collection
 
-	notesService := &usecase.NotesService{
-		NotesRepo: notesRepo,
+	notesService := &usecase.NoteService{
+		NoteRepo: notesRepo,
 	}
 
 	// Return combined cleanup function
@@ -137,7 +137,7 @@ func TestSearchNotes(t *testing.T) {
 	userID := uuid.New().String()
 
 	// Create test notes
-	notes := []*model.Notes{
+	notes := []*model.Note{
 		{
 			ID:        uuid.New().String(),
 			UserID:    userID,
@@ -238,7 +238,7 @@ func TestToggleFavorite(t *testing.T) {
 	userID := uuid.New().String()
 
 	// Create a test note
-	note := &model.Notes{
+	note := &model.Note{
 		ID:      uuid.New().String(),
 		UserID:  userID,
 		Title:   "Test Note",
@@ -286,7 +286,7 @@ func TestToggleFavorite(t *testing.T) {
 
 			if !tt.wantErr {
 				// Verify the change
-				updatedNote, err := svc.NotesRepo.GetNote(tt.noteID, tt.userID)
+				updatedNote, err := svc.NoteRepo.GetNote(tt.noteID, tt.userID)
 				if err != nil {
 					t.Fatalf("Failed to get updated note: %v", err)
 				}
@@ -318,9 +318,9 @@ func TestPinOperations(t *testing.T) {
 	userID := uuid.New().String()
 
 	// Create 6 test notes
-	notes := make([]*model.Notes, 6)
+	notes := make([]*model.Note, 6)
 	for i := 0; i < 6; i++ {
-		notes[i] = &model.Notes{
+		notes[i] = &model.Note{
 			ID:      uuid.New().String(),
 			UserID:  userID,
 			Title:   "Test Note",
@@ -387,13 +387,13 @@ func TestCreateNote(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		note    *model.Notes
+		note    *model.Note
 		wantErr bool
 		errMsg  string
 	}{
 		{
 			name: "Valid Note",
-			note: &model.Notes{
+			note: &model.Note{
 				ID:      uuid.New().String(),
 				UserID:  userID,
 				Title:   "Test Note",
@@ -404,7 +404,7 @@ func TestCreateNote(t *testing.T) {
 		},
 		{
 			name: "Empty Title",
-			note: &model.Notes{
+			note: &model.Note{
 				ID:      uuid.New().String(),
 				UserID:  userID,
 				Content: "Content without title",
@@ -414,7 +414,7 @@ func TestCreateNote(t *testing.T) {
 		},
 		{
 			name: "Empty Content",
-			note: &model.Notes{
+			note: &model.Note{
 				ID:      uuid.New().String(),
 				UserID:  userID,
 				Title:   "Title without content",
@@ -425,7 +425,7 @@ func TestCreateNote(t *testing.T) {
 		},
 		{
 			name: "Missing Both Title and Content",
-			note: &model.Notes{
+			note: &model.Note{
 				ID:     uuid.New().String(),
 				UserID: userID,
 			},
@@ -434,7 +434,7 @@ func TestCreateNote(t *testing.T) {
 		},
 		{
 			name: "Title Too Long",
-			note: &model.Notes{
+			note: &model.Note{
 				ID:      uuid.New().String(),
 				UserID:  userID,
 				Title:   strings.Repeat("a", 201), // 201 characters
@@ -445,7 +445,7 @@ func TestCreateNote(t *testing.T) {
 		},
 		{
 			name: "Content Too Long",
-			note: &model.Notes{
+			note: &model.Note{
 				ID:      uuid.New().String(),
 				UserID:  userID,
 				Title:   "Test Note",
@@ -456,7 +456,7 @@ func TestCreateNote(t *testing.T) {
 		},
 		{
 			name: "Too Many Tags",
-			note: &model.Notes{
+			note: &model.Note{
 				ID:      uuid.New().String(),
 				UserID:  userID,
 				Title:   "Test Note",
@@ -468,7 +468,7 @@ func TestCreateNote(t *testing.T) {
 		},
 		{
 			name: "Minimum Content Length",
-			note: &model.Notes{
+			note: &model.Note{
 				ID:      uuid.New().String(),
 				UserID:  userID,
 				Title:   "Test Note",
@@ -495,7 +495,7 @@ func TestCreateNote(t *testing.T) {
 	// Test note limit
 	t.Run("Note Limit Test", func(t *testing.T) {
 		for i := 0; i < 101; i++ {
-			note := &model.Notes{
+			note := &model.Note{
 				ID:      uuid.New().String(),
 				UserID:  userID,
 				Title:   fmt.Sprintf("Note %d", i),
@@ -521,7 +521,7 @@ func TestUpdateNoteUsecase(t *testing.T) {
 
 	// Create initial note with explicit CreatedAt time
 	createdAt := time.Now().UTC().Round(time.Second) // Round to seconds for comparison
-	originalNote := &model.Notes{
+	originalNote := &model.Note{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		Title:     "Original Title",
@@ -536,12 +536,12 @@ func TestUpdateNoteUsecase(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		updates *model.Notes
+		updates *model.Note
 		wantErr bool
 	}{
 		{
 			name: "Valid Update",
-			updates: &model.Notes{
+			updates: &model.Note{
 				Title:   "Updated Title",
 				Content: "Updated Content",
 				Tags:    []string{"updated"},
@@ -550,7 +550,7 @@ func TestUpdateNoteUsecase(t *testing.T) {
 		},
 		{
 			name: "Invalid - Empty Title",
-			updates: &model.Notes{
+			updates: &model.Note{
 				Title:   "",
 				Content: "Updated Content",
 			},
@@ -558,7 +558,7 @@ func TestUpdateNoteUsecase(t *testing.T) {
 		},
 		{
 			name: "Note Not Found",
-			updates: &model.Notes{
+			updates: &model.Note{
 				ID:      uuid.New().String(),
 				Title:   "Updated Title",
 				Content: "Updated Content",
@@ -580,7 +580,7 @@ func TestUpdateNoteUsecase(t *testing.T) {
 			}
 
 			if !tt.wantErr {
-				updatedNote, err := svc.NotesRepo.GetNote(originalNote.ID, userID)
+				updatedNote, err := svc.NoteRepo.GetNote(originalNote.ID, userID)
 				if err != nil {
 					t.Errorf("Failed to get updated note: %v", err)
 					return
@@ -615,7 +615,7 @@ func TestArchiveOperations(t *testing.T) {
 	userID := uuid.New().String()
 
 	// Create a test note
-	note := &model.Notes{
+	note := &model.Note{
 		ID:      uuid.New().String(),
 		UserID:  userID,
 		Title:   "Test Note",
@@ -682,7 +682,7 @@ func TestTagOperations(t *testing.T) {
 	userID := uuid.New().String()
 
 	// Create notes with various tags
-	notes := []*model.Notes{
+	notes := []*model.Note{
 		{
 			ID:      uuid.New().String(),
 			UserID:  userID,
@@ -758,9 +758,9 @@ func TestPinPositionOperations(t *testing.T) {
 	userID := uuid.New().String()
 
 	// Create and pin some notes
-	notes := make([]*model.Notes, 3)
+	notes := make([]*model.Note, 3)
 	for i := 0; i < 3; i++ {
-		notes[i] = &model.Notes{
+		notes[i] = &model.Note{
 			ID:      uuid.New().String(),
 			UserID:  userID,
 			Title:   fmt.Sprintf("Note %d", i+1),
@@ -873,7 +873,7 @@ func TestSearchSuggestions(t *testing.T) {
 	userID := uuid.New().String()
 
 	// Create notes with various titles and tags
-	notes := []*model.Notes{
+	notes := []*model.Note{
 		{
 			ID:      uuid.New().String(),
 			UserID:  userID,
@@ -967,7 +967,7 @@ func TestAdvancedSearch(t *testing.T) {
 	userID := uuid.New().String()
 
 	// Create test notes with various content
-	notes := []*model.Notes{
+	notes := []*model.Note{
 		{
 			ID:        uuid.New().String(),
 			UserID:    userID,
@@ -1084,7 +1084,7 @@ func TestGetSearchSuggestionsEdgeCases(t *testing.T) {
 	userID := uuid.New().String()
 
 	// Create test notes with various edge cases in titles and tags
-	notes := []*model.Notes{
+	notes := []*model.Note{
 		{
 			ID:      uuid.New().String(),
 			UserID:  userID,

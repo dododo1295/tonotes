@@ -47,47 +47,47 @@ func init() {
 
 func TestTodoRepoOperations(t *testing.T) {
 	// Verify environment setup
-    testutils.VerifyTestEnvironment(t)
+	testutils.VerifyTestEnvironment(t)
 
-    // Log environment variables
-    t.Logf("Test MongoDB URI: %s", os.Getenv("TEST_MONGO_URI"))
-    t.Logf("Test Database: %s", os.Getenv("MONGO_DB_TEST"))
+	// Log environment variables
+	t.Logf("Test MongoDB URI: %s", os.Getenv("TEST_MONGO_URI"))
+	t.Logf("Test Database: %s", os.Getenv("MONGO_DB_TEST"))
 
-    // Setup test database
-    client, cleanup := testutils.SetupTestDB(t)
-    defer cleanup()
+	// Setup test database
+	client, cleanup := testutils.SetupTestDB(t)
+	defer cleanup()
 
-    // Get database reference
-    dbName := os.Getenv("MONGO_DB_TEST")
-    if dbName == "" {
-        t.Fatal("MONGO_DB_TEST environment variable not set")
-    }
-    db := client.Database(dbName)
+	// Get database reference
+	dbName := os.Getenv("MONGO_DB_TEST")
+	if dbName == "" {
+		t.Fatal("MONGO_DB_TEST environment variable not set")
+	}
+	db := client.Database(dbName)
 
-    // Create todos collection
-    err := db.CreateCollection(context.Background(), "todos")
-    if err != nil && !strings.Contains(err.Error(), "NamespaceExists") {
-        t.Fatalf("Failed to create todos collection: %v", err)
-    }
+	// Create todos collection
+	err := db.CreateCollection(context.Background(), "todos")
+	if err != nil && !strings.Contains(err.Error(), "NamespaceExists") {
+		t.Fatalf("Failed to create todos collection: %v", err)
+	}
 
-    // Verify collection exists
-    collections, err := db.ListCollectionNames(context.Background(), bson.M{})
-    if err != nil {
-        t.Fatalf("Failed to list collections: %v", err)
-    }
-    t.Logf("Available collections: %v", collections)
+	// Verify collection exists
+	collections, err := db.ListCollectionNames(context.Background(), bson.M{})
+	if err != nil {
+		t.Fatalf("Failed to list collections: %v", err)
+	}
+	t.Logf("Available collections: %v", collections)
 
-    // Initialize repository
-    todoRepo := repository.TodosRepo{
-        MongoCollection: db.Collection("todos"),
-    }
+	// Initialize repository
+	todoRepo := repository.TodoRepo{
+		MongoCollection: db.Collection("todos"),
+	}
 
-    // Test IDs
-    todoID1 := uuid.New().String()
-    todoID2 := uuid.New().String()
-    userID := uuid.New().String()
+	// Test IDs
+	todoID1 := uuid.New().String()
+	todoID2 := uuid.New().String()
+	userID := uuid.New().String()
 
-    t.Logf("Test IDs - Todo1: %s, Todo2: %s, User: %s", todoID1, todoID2, userID)
+	t.Logf("Test IDs - Todo1: %s, Todo2: %s, User: %s", todoID1, todoID2, userID)
 
 	tests := []struct {
 		name string
@@ -97,7 +97,7 @@ func TestTodoRepoOperations(t *testing.T) {
 			name: "Create Todo - Success",
 			run: func(t *testing.T) {
 				ctx := context.Background()
-				todo := model.Todos{
+				todo := model.Todo{
 					TodoID:      todoID1,
 					UserID:      userID,
 					TodoName:    "Test Todo",
@@ -128,7 +128,7 @@ func TestTodoRepoOperations(t *testing.T) {
 			name: "Create Todo - Duplicate ID",
 			run: func(t *testing.T) {
 				ctx := context.Background()
-				todo := model.Todos{
+				todo := model.Todo{
 					TodoID:      todoID1, // Using same ID as previous test
 					UserID:      userID,
 					TodoName:    "Duplicate Todo",
@@ -149,7 +149,7 @@ func TestTodoRepoOperations(t *testing.T) {
 				ctx := context.Background()
 
 				// Create another todo
-				todo2 := model.Todos{
+				todo2 := model.Todo{
 					TodoID:      todoID2,
 					UserID:      userID,
 					TodoName:    "Test Todo 2",
@@ -174,7 +174,7 @@ func TestTodoRepoOperations(t *testing.T) {
 			name: "Update Todo",
 			run: func(t *testing.T) {
 				ctx := context.Background()
-				updates := model.Todos{
+				updates := model.Todo{
 					TodoName:    "Updated Todo",
 					Description: "Updated Description",
 					Complete:    true,

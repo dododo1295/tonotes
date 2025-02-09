@@ -46,11 +46,11 @@ func TestCreateNoteHandler(t *testing.T) {
 	}
 
 	// Initialize repository and service
-	notesRepo := repository.GetNotesRepo(client)
+	notesRepo := repository.GetNoteRepo(client)
 	notesRepo.MongoCollection = db.Collection("notes")
 
-	notesService := &usecase.NotesService{
-		NotesRepo: notesRepo,
+	notesService := &usecase.NoteService{
+		NoteRepo: notesRepo,
 	}
 
 	// Setup Gin router
@@ -64,7 +64,7 @@ func TestCreateNoteHandler(t *testing.T) {
 
 	router.POST("/notes", func(c *gin.Context) {
 		c.Set("userID", "test-user")
-		notesHandler := handler.NewNotesHandler(notesService)
+		notesHandler := handler.NewNoteHandler(notesService)
 		notesHandler.CreateNote(c)
 	})
 
