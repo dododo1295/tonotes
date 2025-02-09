@@ -5,6 +5,11 @@ import (
 	"time"
 )
 
+type TodoLink struct {
+	Href   string `json:"href"`
+	Method string `json:"method,omitempty"` // Optional: GET, POST, PUT, DELETE, PATCH
+}
+
 type TodoResponse struct {
 	ID                string                  `json:"id"`
 	TodoName          string                  `json:"todo_name"`
@@ -20,10 +25,11 @@ type TodoResponse struct {
 	CreatedAt         time.Time               `json:"created_at"`
 	UpdatedAt         time.Time               `json:"updated_at"`
 	TimeUntilDue      string                  `json:"time_until_due,omitempty"` // New computed field
+	_links            map[string]TodoLink     `json:"_links,omitempty"`
 }
 
 // Convert model.Todos to TodoResponse
-func ToTodoResponse(todo *model.Todo) TodoResponse {
+func ToTodoResponse(todo *model.Todo, links map[string]TodoLink) TodoResponse {
 	response := TodoResponse{
 		ID:                todo.TodoID,
 		TodoName:          todo.TodoName,
@@ -35,6 +41,7 @@ func ToTodoResponse(todo *model.Todo) TodoResponse {
 		RecurrencePattern: todo.RecurrencePattern,
 		CreatedAt:         todo.CreatedAt,
 		UpdatedAt:         todo.UpdatedAt,
+		_links:            links, // Set links
 	}
 
 	// Handle nullable time fields
@@ -62,10 +69,10 @@ func ToTodoResponse(todo *model.Todo) TodoResponse {
 }
 
 // Convert slice of model.Todos to slice of TodoResponse
-func ToTodoResponses(todos []*model.Todo) []TodoResponse {
+func ToTodoResponses(todos []*model.Todo, getTodoLinks func(todo *model.Todo) map[string]TodoLink) []TodoResponse {
 	responses := make([]TodoResponse, len(todos))
 	for i, todo := range todos {
-		responses[i] = ToTodoResponse(todo)
+		responses[i] = ToTodoResponse(todo, getTodoLinks(todo))
 	}
 	return responses
 }
