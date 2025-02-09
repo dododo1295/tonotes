@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-type Notes struct {
+type Note struct {
 	ID             string    `bson:"_id,omitempty" json:"id"`
 	UserID         string    `bson:"user_id" json:"user_id"`
 	Title          string    `bson:"title" json:"title" binding:"required"`

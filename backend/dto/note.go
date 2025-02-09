@@ -25,7 +25,7 @@ type NotesPageResponse struct {
 }
 
 // Convert a single note to NoteResponse
-func ToNoteResponse(note *model.Notes) NoteResponse {
+func ToNoteResponse(note *model.Note) NoteResponse {
 	response := NoteResponse{
 		ID:         note.ID,
 		Title:      note.Title,
@@ -46,7 +46,7 @@ func ToNoteResponse(note *model.Notes) NoteResponse {
 }
 
 // Convert slice of notes to slice of NoteResponse
-func ToNoteResponses(notes []*model.Notes) []NoteResponse {
+func ToNoteResponses(notes []*model.Note) []NoteResponse {
 	responses := make([]NoteResponse, len(notes))
 	for i, note := range notes {
 		responses[i] = ToNoteResponse(note)
@@ -55,7 +55,7 @@ func ToNoteResponses(notes []*model.Notes) []NoteResponse {
 }
 
 // Convert NotesResponse to NotesPageResponse
-func NewNotesPageResponse(notes []*model.Notes, totalCount, pageCount, currentPage int) *NotesPageResponse {
+func NewNotesPageResponse(notes []*model.Note, totalCount, pageCount, currentPage int) *NotesPageResponse {
 	return &NotesPageResponse{
 		Notes:       ToNoteResponses(notes),
 		TotalCount:  totalCount,

@@ -16,7 +16,7 @@ const (
 	RecurrenceYearly  RecurrencePattern = "YEARLY"
 )
 
-type Todos struct {
+type Todo struct {
 	TodoID            string            `bson:"_id,omitempty" json:"id"`
 	UserID            string            `bson:"user_id" json:"user_id"`
 	TodoName          string            `bson:"todo_name" json:"todo_name" binding:"required"`
@@ -31,22 +31,4 @@ type Todos struct {
 	IsRecurring       bool              `bson:"is_recurring,omitempty" json:"is_recurring,omitempty"`
 	RecurrencePattern RecurrencePattern `bson:"recurrence_pattern,omitempty" json:"recurrence_pattern,omitempty"`
 	RecurrenceEndDate time.Time         `bson:"recurrence_end_date,omitempty" json:"recurrence_end_date,omitempty"`
-}
-
-type TodoStats struct {
-	// Basic counts
-	Total     int `json:"total"`
-	Completed int `json:"completed"`
-	Pending   int `json:"pending"`
-
-	// Priority based counts
-	HighPriority   int `json:"high_priority"`
-	MediumPriority int `json:"medium_priority"`
-	LowPriority    int `json:"low_priority"`
-
-	// Time based counts
-	Overdue       int `json:"overdue"`
-	DueToday      int `json:"due_today"`
-	Upcoming      int `json:"upcoming"` // Due in next 7 days
-	WithReminders int `json:"with_reminders"`
 }
