@@ -4,6 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"main/handler"
+	"main/middleware"
+	"main/repository"
+	"main/services"
+	"main/usecase"
+	"main/utils"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,13 +17,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"main/handler"
-	"main/middleware"
-	"main/repository"
-	"main/services"
-	"main/usecase"
-	"main/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -200,13 +199,13 @@ func setupRouter() *gin.Engine {
 		}
 
 		// Check MongoDB connection
-		if err := utils.CheckMongoConnection(); err != nil {
-			health["services"].(map[string]string)["mongodb"] = "down"
-			utils.TrackDependencyHealth("mongodb", "connection", false)
-		} else {
-			health["services"].(map[string]string)["mongodb"] = "up"
-			utils.TrackDependencyHealth("mongodb", "connection", true)
-		}
+		//		if err := utils.CheckMongoConnection(); err != nil {
+		//			//			health["services"].(map[string]string)["mongodb"] = "down"
+		//			utils.TrackDependencyHealth("mongodb", "connection", false)
+		//		} else {
+		//			health["services"].(map[string]string)["mongodb"] = "up"
+		//			utils.TrackDependencyHealth("mongodb", "connection", true)
+		//		}
 
 		// Track API health
 		utils.TrackAPIHealth("/health", true)
@@ -372,7 +371,7 @@ func main() {
 	}()
 
 	// Start MongoDB health check routine
-	go monitorDatabaseHealth()
+	//	go monitorDatabaseHealth()
 
 	// Graceful shutdown handling
 	quit := make(chan os.Signal, 1)
@@ -383,16 +382,16 @@ func main() {
 	performGracefulShutdown(srv)
 }
 
-func monitorDatabaseHealth() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
+// func monitorDatabaseHealth() {
+//	ticker := time.NewTicker(30 * time.Second)
+//	defer ticker.Stop()
 
-	for range ticker.C {
-		if err := utils.CheckMongoConnection(); err != nil {
-			log.Printf("MongoDB health check failed: %v", err)
-		}
-	}
-}
+//	for range ticker.C {
+//		if err := utils.CheckMongoConnection(); err != nil {
+//			log.Printf("MongoDB health check failed: %v", err)
+//		}
+//	}
+//}
 
 func performGracefulShutdown(srv *http.Server) {
 	// Create context with timeout for shutdown
